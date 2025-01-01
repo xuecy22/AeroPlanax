@@ -1,10 +1,6 @@
-# import os
-# import sys
 import jax.numpy as jnp
 from jax import jit
-# sys.path.append(os.path.dirname(os.path.realpath('.')))
-# print(os.path.dirname(os.path.realpath('.')))
-import F16_jax.hifi_F16_AeroData as hifi_F16
+from . import hifi_F16_AeroData as hifi_F16
 
 
 @jit
