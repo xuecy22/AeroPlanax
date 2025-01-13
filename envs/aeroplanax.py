@@ -1,3 +1,5 @@
+from pathlib import Path
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple, Union
 import chex
 from flax import struct
@@ -8,6 +10,7 @@ from gymnax.environments import environment
 from gymnax.environments import spaces
 from .tasks.heading_task import reset, get_obs, reward_functions, termination_conditions
 from .models.F16.F16_Dynamics import update
+from .utils.utils import enu_to_geodetic
 
 
 @struct.dataclass
@@ -53,6 +56,7 @@ class AeroPlanax(environment.Environment[EnvState, EnvParams]):
             self.num_observation = 16
         else:
             raise NotImplementedError
+        self.create_records = False
 
     @property
     def default_params(self) -> EnvParams:
@@ -135,6 +139,38 @@ class AeroPlanax(environment.Environment[EnvState, EnvParams]):
         )
         done = state.done + state.bad_done
         return done, state
+    
+    def render(self, state: EnvState, params: EnvParams, output_dir: str):
+        """Small utility for plotting the agent's state."""
+
+        if state.time == 0:
+            self.create_records = False
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S.%f')[:-3]
+            self.filename =  output_dir + str_date_time + '.txt.acmi'
+        if not self.create_records:
+            with open(self.filename, mode='w', encoding='utf-8') as f:
+                f.write("FileType=text/acmi/tacview\n")
+                f.write("FileVersion=2.0\n")
+                f.write("0,ReferenceTime=2023-04-01T00:00:00Z\n")
+            self.create_records = True
+        with open(self.filename, mode='a', encoding='utf-8') as f:
+            timestamp = state.time * params.dt
+            f.write(f"#{timestamp:.2f}\n")
+            npos, epos, alt = state.north, state.east, state.altitude
+            roll, pitch, yaw = state.roll, state.pitch, state.yaw
+            npos = npos * 0.3048
+            epos = epos * 0.3048
+            alt = alt * 0.3048
+            roll = roll * 180 / jnp.pi
+            pitch = pitch * 180 / jnp.pi
+            yaw = yaw * 180 / jnp.pi
+            lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
+            log_msg = f"{100},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
+            log_msg += f"Name=F16,"
+            log_msg += f"Color=Red"
+            if log_msg is not None:
+                f.write(log_msg + "\n")
 
     @property
     def name(self) -> str:
