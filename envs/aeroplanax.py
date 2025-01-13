@@ -117,7 +117,7 @@ class AeroPlanax(environment.Environment[EnvState, EnvParams]):
             time_out=jnp.array(False), time=jnp.array(0)
         )
         
-        reset(key=key, state=state)
+        state = reset(key=key, state=state)
 
         return self.get_obs(state=state, params=params, key=key), state
 

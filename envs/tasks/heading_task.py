@@ -37,17 +37,17 @@ termination_conditions = [
 ]
 
 def reset(key, state):
-    altitude = jax.random.uniform(key, shape=(1,), 
+    altitude = jax.random.uniform(key, shape=(), 
                                   minval=params['min_altitude'], maxval=params['max_altitude'])
-    vt = jax.random.uniform(key, shape=(1,), minval=params['min_vt'], maxval=params['max_vt'])
+    vt = jax.random.uniform(key, shape=(), minval=params['min_vt'], maxval=params['max_vt'])
     
-    delta_heading = jax.random.uniform(key, shape=(1,), 
+    delta_heading = jax.random.uniform(key, shape=(), 
                                        minval=-params['max_heading_increment'], 
                                        maxval=params['max_heading_increment'])
-    delta_altitude = jax.random.uniform(key, shape=(1,), 
+    delta_altitude = jax.random.uniform(key, shape=(), 
                                         minval=-params['max_altitude_increment'], 
                                         maxval=params['max_altitude_increment'])
-    delta_vt = jax.random.uniform(key, shape=(1,), 
+    delta_vt = jax.random.uniform(key, shape=(), 
                                   minval=-params['max_velocities_u_increment'], 
                                   maxval=params['max_velocities_u_increment'])
 
