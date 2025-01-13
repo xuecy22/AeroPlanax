@@ -90,8 +90,9 @@ class AeroPlanax(environment.Environment[EnvState, EnvParams]):
             overload=newstate[17],
             time=state.time + 1
         )
-        done = self.is_terminal(state, params)
+        done, state = self.is_terminal(state, params)
         reward = get_reward(reward_functions=reward_functions, state=state)
+        reward = reward.squeeze()
         return (
             lax.stop_gradient(self.get_obs(state, params, key)),
             lax.stop_gradient(state),
@@ -133,7 +134,7 @@ class AeroPlanax(environment.Environment[EnvState, EnvParams]):
             time_out=state.time_out + time_outs
         )
         done = state.done + state.bad_done
-        return done
+        return done, state
 
     @property
     def name(self) -> str:

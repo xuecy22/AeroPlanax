@@ -24,7 +24,7 @@ params = {
 
 reward_functions = [
     HeadingReward,
-    EventDrivenReward,
+    EventDrivenReward
 ]
 
 termination_conditions = [
@@ -61,6 +61,7 @@ def reset(key, state):
         target_heading=target_heading,
         target_vt=target_vt
     )
+    return state
     
 def get_obs(state, key):
     """
