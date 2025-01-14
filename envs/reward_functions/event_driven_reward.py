@@ -1,3 +1,8 @@
+params = {
+    'fail_reward': -200,
+    'success_reward': 200
+}
+
 def EventDrivenReward(state):
     """
     EventDrivenReward
@@ -5,5 +10,5 @@ def EventDrivenReward(state):
     - Done: +200
     - Bad_done: -200
     """
-    reward = -200 * state.bad_done + 200 * state.done
+    reward = params['fail_reward'] * state.bad_done + params['success_reward'] * state.done
     return reward

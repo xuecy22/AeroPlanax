@@ -1,11 +1,14 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+from datetime import datetime
 import optax
 from flax.linen.initializers import constant, orthogonal
 import functools
@@ -354,7 +357,7 @@ config = {
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
     "NUM_MINIBATCHES": 5,
-    "GAMMA": 0.99,
+    "GAMMA": 0.999,
     "GAE_LAMBDA": 0.95,
     "CLIP_EPS": 0.2,
     "ENT_COEF": 1e-3,
@@ -362,8 +365,21 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "tanh",
     "ANNEAL_LR": True,
+    "output_dir": './results/'
 }
 
 rng = jax.random.PRNGKey(42)
 train_jit = jax.jit(make_train(config))
 out = train_jit(rng)
+str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
+output_dir = config['output_dir'] + str_date_time
+Path(output_dir).mkdir(parents=True, exist_ok=True)
+plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
+plt.xlabel("Update Step")
+plt.ylabel("Return")
+plt.savefig(output_dir + '/returned_episode_returns.png')
+plt.cla()
+plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
+plt.xlabel("Update Step")
+plt.ylabel("Return")
+plt.savefig(output_dir + '/returned_episode_lengths.png')

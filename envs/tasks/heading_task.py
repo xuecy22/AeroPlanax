@@ -18,7 +18,7 @@ params = {
     'min_vt': 1000,
     'max_heading_increment': 0.3,
     'max_altitude_increment': 500,
-    'max_velocities_u_increment': 100,
+    'max_velocities_u_increment': 50,
     'noise_scale': 0.0
 }
 

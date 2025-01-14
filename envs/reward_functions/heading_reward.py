@@ -19,4 +19,4 @@ def HeadingReward(state):
     reward_heading = -delta_heading ** 2
     reward_vt = -delta_vt ** 2
     reward_target = reward_altitude + reward_heading + reward_vt
-    return reward_target
+    return reward_target * params['reward_scale']
