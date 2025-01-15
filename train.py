@@ -230,7 +230,7 @@ def make_train(config):
                     unroll=16
                 )
                 return advantages, advantages + traj_batch.value
-            advantages, targets = _calculate_gae(traj_batch, last_val, last_done)
+            advantages, targets = _calculate_gae(traj_batch, last_val)
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
@@ -368,8 +368,6 @@ def make_train(config):
             }
 
             rng = update_state[-1]
-            if config.get("DEBUG"):
-
             metric["update_steps"] = update_steps
             if config.get("DEBUG"):
                 def callback(metric):
