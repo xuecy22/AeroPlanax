@@ -71,6 +71,7 @@ class AeroPlanax(environment.Environment[EnvState, EnvParams]):
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
         """Integrate AeroPlanax ODE and return transition."""
+        action = jnp.clip(action, min=-1, max=1)
         newstate = update(state, action, params.dt)
         # Update state dict and evaluate termination conditions
         state = state.replace(
