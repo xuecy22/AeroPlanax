@@ -13,6 +13,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 import functools
 from typing import Sequence, NamedTuple, Any, Dict
+from flax.training import checkpoints
 from flax.training.train_state import TrainState
 import distrax
 import gymnax
@@ -357,7 +358,7 @@ config = {
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
     "NUM_MINIBATCHES": 5,
-    "GAMMA": 0.999,
+    "GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
     "CLIP_EPS": 0.2,
     "ENT_COEF": 1e-3,
@@ -383,3 +384,5 @@ plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
 plt.xlabel("Update Step")
 plt.ylabel("Return")
 plt.savefig(output_dir + '/returned_episode_lengths.png')
+checkpoint_dir = os.path.abspath(output_dir)
+checkpoints.save_checkpoint(checkpoint_dir, out['runner_state'][0].params, step=out['metric']["returned_episode_lengths"].shape[0])

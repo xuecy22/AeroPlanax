@@ -3,7 +3,7 @@ from ..utils.utils import wrap_PI
 
 
 params = {
-    'max_check_interval': 1500,
+    'max_check_interval': 2500,
     'min_check_interval': 300
 }
 

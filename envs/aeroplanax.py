@@ -155,10 +155,10 @@ class AeroPlanax(environment.Environment[EnvState, EnvParams]):
                 f.write("0,ReferenceTime=2023-04-01T00:00:00Z\n")
             self.create_records = True
         with open(self.filename, mode='a', encoding='utf-8') as f:
-            timestamp = state.time * params.dt
+            timestamp = state.time[0] * params.dt
             f.write(f"#{timestamp:.2f}\n")
-            npos, epos, alt = state.north, state.east, state.altitude
-            roll, pitch, yaw = state.roll, state.pitch, state.yaw
+            npos, epos, alt = state.north[0], state.east[0], state.altitude[0]
+            roll, pitch, yaw = state.roll[0], state.pitch[0], state.yaw[0]
             npos = npos * 0.3048
             epos = epos * 0.3048
             alt = alt * 0.3048
