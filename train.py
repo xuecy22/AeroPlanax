@@ -1,8 +1,9 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
+import wandb
 import jax.numpy as jnp
 import flax.linen as nn
 import numpy as np
@@ -407,6 +408,7 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
+    "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 1000,
     "NUM_STEPS": 3000,
@@ -428,9 +430,24 @@ config = {
     "LOGDIR": "results/" + str_date_time + "/logs",
 }
 
-rng = jax.random.PRNGKey(42)
+seed = config['SEED']
+wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
+wandb.init(
+    # set the wandb project where this run will be logged
+    project="AeroPlanax",
+    # track hyperparameters and run metadata
+    config=config,
+    name=f'seed_{seed}',
+    group='heading',
+    notes='expand the target',
+    dir=config['LOGDIR'],
+    reinit=True,
+)
+
+rng = jax.random.PRNGKey(seed)
 train_jit = jax.jit(make_train(config))
 out = train_jit(rng)
+wandb.finish()
 
 output_dir = config["OUTPUTDIR"]
 Path(output_dir).mkdir(parents=True, exist_ok=True)
