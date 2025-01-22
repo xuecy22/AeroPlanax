@@ -1,6 +1,30 @@
 import jax.numpy as jnp
 from jax import jit
-from . import hifi_F16_AeroData as hifi_F16
+import chex
+from flax import struct
+from . import aero_data as hifi_F16
+from ...base_dataclass import BaseState, BaseControlState
+
+
+@struct.dataclass
+class FighterPlaneState(BaseState):
+    # posture
+    alpha: chex.Array
+    beta: chex.Array
+    # velocity
+    vt: chex.Array
+    # angular velocity
+    P: chex.Array
+    Q: chex.Array
+    R: chex.Array
+    # acceleration
+    overload: chex.Array
+
+
+@struct.dataclass
+class FighterPlaneControlState(BaseControlState):
+    leading_edge_flap: chex.Array
+
 
 
 @jit
@@ -212,21 +236,24 @@ def nlplant(xu):
     return xdot
 
 @jit
-def update(state, action, dt):
-    x = jnp.hstack((state.north, state.east, state.altitude, 
+def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float) -> FighterPlaneState:
+    x = jnp.hstack((state.north, state.east, state.altitude,
                     state.roll, state.pitch, state.yaw,
                     state.vt, state.alpha, state.beta,
                     state.P, state.Q, state.R))
-    T = 0.9 * state.T + 0.1 * action[0] * 0.225 * 76300 / 0.3048
-    el = 0.9 * state.el + 0.1 * action[1] * 45
-    ail = 0.9 * state.ail + 0.1 * action[2] * 45
-    rud = 0.9 * state.rud + 0.1 * action[3] * 45
-    u = jnp.hstack((T, el, ail, rud, state.lef))
+    u = jnp.hstack((action.throttle, action.elevator, action.aileron, action.rudder,
+                    action.leading_edge_flap))
     xu = jnp.hstack((x, u))
     xdot = nlplant(xu)
     nx_cg, ny_cg, nz_cg = accels(xu[3], xu[4], xu[7], xu[8], xu[6], 
                                  xdot[7], xdot[8], xdot[6], xu[9], xu[10], xu[11])
     overload = jnp.sqrt(nx_cg ** 2 + ny_cg ** 2 + nz_cg ** 2)
     new_x = x + xdot[:12] * dt
-    new_state = jnp.hstack((new_x, u, overload))
-    return new_state
+    state = state.replace(
+        north=new_x[0], east=new_x[1], altitude=new_x[2],
+        roll=new_x[3], pitch=new_x[4], yaw=new_x[5],
+        vt=new_x[6], alpha=new_x[7], beta=new_x[8],
+        P=new_x[9], Q=new_x[10], R=new_x[11],
+        overload=overload
+    )
+    return state
