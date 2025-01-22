@@ -1,16 +1,16 @@
-import jax.numpy as jnp
+from typing import Tuple
+from ..aeroplanax import TEnvState, TEnvParams, AgentID
 
 
-params = {
-    'max_steps': 3000
-}
-
-def Timeout(state):
+def timeout_fn(
+    state: TEnvState,
+    params: TEnvParams,
+    agent_id: AgentID,
+    max_steps: int = 3000
+) -> Tuple[bool, bool]:
     """
-    Timeout
     Episode terminates if max_step steps have passed.
     """
-    time_out = (state.time - params['max_steps']) >= 0
-    bad_done = jnp.zeros_like(time_out)
-    done = jnp.zeros_like(time_out)
-    return bad_done, done, time_out
+    done = state.time >= max_steps
+    success = False
+    return done, success

@@ -1,17 +1,21 @@
 import jax.numpy as jnp
+from ..aeroplanax import TEnvState, TEnvParams, AgentID
 from ..utils.utils import wrap_PI
 
-params = {
-    'reward_scale': 1 
-}
 
-def HeadingReward(state):
+def heading_reward_fn(
+        state: TEnvState,
+        params: TEnvParams,
+        agent_id: AgentID,
+        reward_scale: float = 1.0
+    ) -> float:
     """
     Measure the difference between the current heading and the target heading
     """
-    altitude = state.altitude
-    yaw = state.yaw
-    vt = state.vt
+    # TODO: data type check before computing reward
+    altitude = state.state.altitude
+    yaw = state.state.yaw
+    vt = state.state.vt
     delta_altitude = (altitude - state.target_altitude) * 0.3048 / 1000
     delta_heading = wrap_PI(yaw - state.target_heading) / jnp.pi
     delta_vt = (vt - state.target_vt) * 0.3048 / 340
@@ -19,4 +23,4 @@ def HeadingReward(state):
     reward_heading = -delta_heading ** 2
     reward_vt = -delta_vt ** 2
     reward_target = reward_altitude + reward_heading + reward_vt
-    return reward_target * params['reward_scale']
+    return reward_target * reward_scale

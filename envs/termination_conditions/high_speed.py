@@ -1,17 +1,19 @@
-import jax.numpy as jnp
+from typing import Tuple
+from ..aeroplanax import TEnvState, TEnvParams, AgentID
+from ..core.simulators.fighterplane.dynamic import FighterPlaneState
 
 
-params = {
-    'max_velocity': 3
-}
-
-def HighSpeed(state):
+def high_speed_fn(
+    state: TEnvState,
+    params: TEnvParams,
+    agent_id: AgentID,
+    max_velocity: float = 3
+) -> Tuple[bool, bool]:
     """
-    HighSpeed
     End up the simulation if speed are too high.
     """
-    velocity = state.vt * 0.3048 / 340
-    bad_done = (velocity - params['max_velocity']) >= 0
-    done = jnp.zeros_like(bad_done)
-    time_out = jnp.zeros_like(bad_done)
-    return bad_done, done, time_out
+    plane_state: FighterPlaneState = state.state
+    velocity: float = plane_state.vt[agent_id] * 0.3048 / 340
+    done = velocity > max_velocity
+    success = False
+    return done, success

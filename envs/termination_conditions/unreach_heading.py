@@ -1,37 +1,38 @@
+from typing import Tuple
+from ..aeroplanax import TEnvState, TEnvParams, AgentID
+from ..core.simulators.fighterplane.dynamic import FighterPlaneState
+
 import jax.numpy as jnp
 from ..utils.utils import wrap_PI
 
 
-params = {
-    'max_check_interval': 2500,
-    'min_check_interval': 300
-}
-
-def UnreachHeading(state):
+def unreach_heading_fn(
+    state: TEnvState,
+    params: TEnvParams,
+    agent_id: AgentID,
+    max_check_interval: int = 2500,
+    min_check_interval: int = 300
+) -> Tuple[bool, bool]:
     """
-    UnreachHeading
     End up the simulation if the aircraft didn't reach the target heading or attitude in limited time.
     """
-    yaw = state.yaw
-    altitude = state.altitude
-    vt = state.vt
+    plane_state: FighterPlaneState = state.state
+    yaw = plane_state.yaw[agent_id]
+    altitude = plane_state.altitude[agent_id]
+    vt = plane_state.vt[agent_id]
     check_time = state.time
     # 判断时间
-    mask1 = check_time >= params['max_check_interval']
-    mask2 = check_time >= params['min_check_interval']
+    mask1 = check_time >= max_check_interval
+    mask2 = check_time >= min_check_interval
     # 判断是否到达target_heading
-    mask3 = jnp.abs(wrap_PI(yaw - state.target_heading)) >= jnp.pi / 36
+    mask3 = jnp.abs(wrap_PI(yaw - state.target_heading)) < jnp.pi / 36
     # 判断是否到达target_altitude
-    mask4 = jnp.abs(altitude - state.target_altitude) >= 100
+    mask4 = jnp.abs(altitude - state.target_altitude) < 100
     # 判断是否到达target_vt
-    mask5  =jnp.abs(vt - state.target_vt) >= 20
-    # 判断roll是否满足要求
-    # mask6 = torch.abs(wrap_PI(roll)) >= torch.pi / 36
-    # 当超过时间且未达到目标时，判断为True
-    # bad_done = mask1 & ((mask3 | mask4) | (mask5 | mask6))
-    bad_done = mask1 & ((mask3 | mask4) | mask5)
-    # 当达到目标且时间符合要求时，重新设置目标
-    # done =  ((~((mask3 | mask4) | (mask5 | mask6))) & (~mask1)) & mask2
-    done =  ((~((mask3 | mask4) | mask5)) & (~mask1)) & mask2
-    time_out = jnp.zeros_like(done)
-    return bad_done, done, time_out
+    mask5 = jnp.abs(vt - state.target_vt) < 20
+
+    # 当达到目标且时间符合要求时, 任务成功
+    success = (~mask1) & mask2 & mask3 & mask4 & mask5
+    # 任务成功或超时, 则任务结束
+    done = success | mask1
+    return done, success

@@ -1,6 +1,5 @@
+import jax
 import jax.numpy as jnp
-from jax import jit
-import chex
 from flax import struct
 from . import aero_data as hifi_F16
 from ...base_dataclass import BaseState, BaseControlState
@@ -9,25 +8,52 @@ from ...base_dataclass import BaseState, BaseControlState
 @struct.dataclass
 class FighterPlaneState(BaseState):
     # posture
-    alpha: chex.Array
-    beta: chex.Array
+    alpha: jax.typing.ArrayLike = 0
+    beta: jax.typing.ArrayLike = 0
     # velocity
-    vt: chex.Array
+    vt: jax.typing.ArrayLike = 0
     # angular velocity
-    P: chex.Array
-    Q: chex.Array
-    R: chex.Array
+    P: jax.typing.ArrayLike = 0
+    Q: jax.typing.ArrayLike = 0
+    R: jax.typing.ArrayLike = 0
     # acceleration
-    overload: chex.Array
+    overload: jax.typing.ArrayLike = 0
+
+    @classmethod
+    def create(cls, state: jax.Array):
+        return cls(
+            north=state[0],
+            east=state[1],
+            altitude=state[2],
+            roll=state[3],
+            pitch=state[4],
+            yaw=state[5],
+            status=state[6],
+            alpha=state[7],
+            beta=state[8],
+            vt=state[9],
+            P=state[10],
+            Q=state[11],
+            R=state[12],
+            overload=state[13],
+        )
 
 
 @struct.dataclass
 class FighterPlaneControlState(BaseControlState):
-    leading_edge_flap: chex.Array
+    leading_edge_flap: jax.typing.ArrayLike = 0
+
+    @classmethod
+    def create(cls, action: jax.Array):
+        return cls(
+            throttle=action[0],
+            elevator=action[1],
+            aileron=action[2],
+            rudder=action[3],
+            leading_edge_flap=0,
+        )
 
 
-
-@jit
 def atmos(alt, vt):
     # 根据高度和速度计算动压、马赫数
     rho0 = 2.377e-3
@@ -43,7 +69,7 @@ def atmos(alt, vt):
 
     return (mach, qbar, ps)
 
-@jit
+
 def accels(roll, pitch, alpha, beta, vt, alpha_dot, beta_dot, vt_dot, P, Q, R):
     # 根据飞行状态结算三轴过载
     grav = 32.174
@@ -62,7 +88,7 @@ def accels(roll, pitch, alpha, beta, vt, alpha_dot, beta_dot, vt_dot, P, Q, R):
     nz_cg = -1.0 / grav * (w_dot + P * vel_v - Q * vel_u) + jnp.cos(pitch) * jnp.cos(roll)
     return (nx_cg, ny_cg, nz_cg)
 
-@jit
+
 def nlplant(xu):
     xdot = jnp.zeros_like(xu)
     g = 32.17
@@ -235,7 +261,7 @@ def nlplant(xu):
 
     return xdot
 
-@jit
+
 def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float) -> FighterPlaneState:
     x = jnp.hstack((state.north, state.east, state.altitude,
                     state.roll, state.pitch, state.yaw,

@@ -1,14 +1,17 @@
-params = {
-    'fail_reward': -200,
-    'success_reward': 200
-}
+from ..aeroplanax import TEnvState, TEnvParams, AgentID
 
-def EventDrivenReward(state):
+
+def event_driven_reward_fn(
+        state: TEnvState,
+        params: TEnvParams,
+        agent_id: AgentID,
+        fail_reward: float = -200,
+        success_reward: float = 200
+    ) -> float:
     """
-    EventDrivenReward
-    Achieve reward when the following event happens:
+    Reward is given when the following event happens:
     - Done: +200
     - Bad_done: -200
     """
-    reward = params['fail_reward'] * state.bad_done + params['success_reward'] * state.done
+    reward = state.done * (state.success * success_reward + (1 - state.success) * fail_reward)
     return reward
