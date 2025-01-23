@@ -5,52 +5,18 @@ import jax.numpy as jnp
 from jax import jit
 import scipy.io as scio
 from ..lib.servo import servo_hps700
-
-
-@jit
-def linear_interp(grid_x, values, point):
-    """
-    一维线性插值函数
-
-    参数:
-    - grid_x: 网格坐标（升序排列），形状为 (nx,)
-    - values: 网格点的值，形状为 (nx,)
-    - point: 插值点的坐标，标量
-
-    返回:
-    - 插值后的值，标量
-    """
-    x = point
-    # 找到插值点所在的索引
-    ix = jnp.searchsorted(grid_x, x) - 1
-
-    # 确保索引在有效范围内
-    ix = jnp.clip(ix, 0, len(grid_x) - 2)
-
-    # 获取两个邻近点的值
-    x0 = grid_x[ix]
-    x1 = grid_x[ix + 1]
-    y0 = values[ix]
-    y1 = values[ix + 1]
-
-    # 计算插值权重
-    t = (x - x0) / (x1 - x0)
-
-    # 执行线性插值
-    y = y0 * (1 - t) + y1 * t
-
-    return y
+from ..lib.utils import linear_interp
 
 
 curr_path = os.path.dirname(__file__)
-data_path = os.path.join(curr_path, "ControlSurfaceDeviationJ20.mat")
-CSDJ20 = scio.loadmat(data_path)
+data_path = os.path.join(curr_path, "data/ControlSurfaceDeviation.mat")
+CSDCanardPlane = scio.loadmat(data_path)
 
 CSD_AngleMin = jnp.zeros(6)
 CSD_AngleMax = jnp.zeros(6)
 
-LCR_PWM = jnp.array(CSDJ20["LCR"][0][0][0].squeeze())
-LCR_Angle = jnp.array(CSDJ20["LCR"][0][0][1].squeeze())
+LCR_PWM = jnp.array(CSDCanardPlane["LCR"][0][0][0].squeeze())
+LCR_Angle = jnp.array(CSDCanardPlane["LCR"][0][0][1].squeeze())
 CSD_AngleMin = CSD_AngleMin.at[0].set(min(LCR_Angle[0], LCR_Angle[-1]))
 CSD_AngleMax = CSD_AngleMax.at[0].set(max(LCR_Angle[0], LCR_Angle[-1]))
 
@@ -62,8 +28,8 @@ def LCR_PWM2Angle(point):
 def LCR_Angle2PWM(point):
     return linear_interp(LCR_Angle, LCR_PWM, point)
 
-RCR_PWM = jnp.array(CSDJ20["RCR"][0][0][0].squeeze())
-RCR_Angle = jnp.array(CSDJ20["RCR"][0][0][1].squeeze())
+RCR_PWM = jnp.array(CSDCanardPlane["RCR"][0][0][0].squeeze())
+RCR_Angle = jnp.array(CSDCanardPlane["RCR"][0][0][1].squeeze())
 CSD_AngleMin = CSD_AngleMin.at[1].set(min(RCR_Angle[0], RCR_Angle[-1]))
 CSD_AngleMax = CSD_AngleMax.at[1].set(max(RCR_Angle[0], RCR_Angle[-1]))
 
@@ -75,8 +41,8 @@ def RCR_PWM2Angle(point):
 def RCR_Angle2PWM(point):
     return linear_interp(RCR_Angle, RCR_PWM, point)
 
-LEA_PWM = jnp.array(CSDJ20["LEA"][0][0][0].squeeze())
-LEA_Angle = jnp.array(CSDJ20["LEA"][0][0][1].squeeze())
+LEA_PWM = jnp.array(CSDCanardPlane["LEA"][0][0][0].squeeze())
+LEA_Angle = jnp.array(CSDCanardPlane["LEA"][0][0][1].squeeze())
 CSD_AngleMin = CSD_AngleMin.at[2].set(min(LEA_Angle[0], LEA_Angle[-1]))
 CSD_AngleMax = CSD_AngleMax.at[2].set(max(LEA_Angle[0], LEA_Angle[-1]))
 
@@ -88,8 +54,8 @@ def LEA_PWM2Angle(point):
 def LEA_Angle2PWM(point):
     return linear_interp(LEA_Angle, LEA_PWM, point)
 
-REA_PWM = jnp.array(CSDJ20["REA"][0][0][0].squeeze())
-REA_Angle = jnp.array(CSDJ20["REA"][0][0][1].squeeze())
+REA_PWM = jnp.array(CSDCanardPlane["REA"][0][0][0].squeeze())
+REA_Angle = jnp.array(CSDCanardPlane["REA"][0][0][1].squeeze())
 CSD_AngleMin = CSD_AngleMin.at[3].set(min(REA_Angle[0], REA_Angle[-1]))
 CSD_AngleMax = CSD_AngleMax.at[3].set(max(REA_Angle[0], REA_Angle[-1]))
 
@@ -101,8 +67,8 @@ def REA_PWM2Angle(point):
 def REA_Angle2PWM(point):
     return linear_interp(REA_Angle, REA_PWM, point)
 
-LVT_PWM = jnp.array(CSDJ20["LVT"][0][0][0].squeeze())
-LVT_Angle = jnp.array(CSDJ20["LVT"][0][0][1].squeeze())
+LVT_PWM = jnp.array(CSDCanardPlane["LVT"][0][0][0].squeeze())
+LVT_Angle = jnp.array(CSDCanardPlane["LVT"][0][0][1].squeeze())
 CSD_AngleMin = CSD_AngleMin.at[4].set(min(LVT_Angle[0], LVT_Angle[-1]))
 CSD_AngleMax = CSD_AngleMax.at[4].set(max(LVT_Angle[0], LVT_Angle[-1]))
 
@@ -114,8 +80,8 @@ def LVT_PWM2Angle(point):
 def LVT_Angle2PWM(point):
     return linear_interp(LVT_Angle, LVT_PWM, point)
 
-RVT_PWM = jnp.array(CSDJ20["RVT"][0][0][0].squeeze())
-RVT_Angle = jnp.array(CSDJ20["RVT"][0][0][1].squeeze())
+RVT_PWM = jnp.array(CSDCanardPlane["RVT"][0][0][0].squeeze())
+RVT_Angle = jnp.array(CSDCanardPlane["RVT"][0][0][1].squeeze())
 CSD_AngleMin = CSD_AngleMin.at[5].set(min(RVT_Angle[0], RVT_Angle[-1]))
 CSD_AngleMax = CSD_AngleMax.at[5].set(max(RVT_Angle[0], RVT_Angle[-1]))
 
@@ -128,7 +94,7 @@ def RVT_Angle2PWM(point):
 ServoNum = 5
 
 @flax.struct.dataclass
-class ControlSurfaceJ20:
+class ControlSurface:
     CSDAngel: jnp.ndarray
     CSDPWMCMD: jnp.ndarray
     Servos0: servo_hps700.ServoHPS700
@@ -205,7 +171,7 @@ def Static_GetServoPWM(CSDAngle):
     PWM = PWM.at[5].set(RVT_Angle2PWM(CSDAngle[5]))
     return PWM
 
-def createControlSurfaceJ20(delta=jnp.zeros(6)):
+def createControlSurface(delta=jnp.zeros(6)):
     """Control surface deviation model: from servo PWM to control surface angle
 
     Args:
@@ -220,7 +186,7 @@ def createControlSurfaceJ20(delta=jnp.zeros(6)):
     Servos2 = servo_hps700.createServoHPS700(7.4, CSDPWMCMD[2])
     Servos3 = servo_hps700.createServoHPS700(7.4, CSDPWMCMD[3])
     Servos4 = servo_hps700.createServoHPS700(7.4, CSDPWMCMD[4])
-    state = ControlSurfaceJ20(
+    state = ControlSurface(
         CSDAngel=CSDAngel,
         CSDPWMCMD=CSDPWMCMD,
         Servos0=Servos0,
@@ -320,19 +286,3 @@ def setAngleByAngleCMD(state, deltaT, angleCMD, dynamic_pressure, alpha, beta):
     pwm_cmd = pwm_cmd[[0, 1, 2, 4, 5]]
     return setAngleByPWM(state, deltaT, pwm_cmd, dynamic_pressure, alpha, beta)
 
-
-# if __name__ == '__main__':
-#     pwm = jnp.linspace(1000, 2000, 101)
-#     PWM = jnp.tile(pwm, (6, 1))
-#     CSD = jnp.zeros((6, 101))
-#     for i in range(101):
-#         CSD[:, i] = Static_GetSurfaceAngle(PWM[:, i])
-
-#     pwm_cmd = jnp.array([1960, 1750, 1610, 1230, 1500, 1400, 1600, 1100])
-#     timeLen = 7.0
-#     N = 10000
-#     tLog = jnp.linspace(0, timeLen, N)
-#     PWMCMD = jnp.zeros(N)
-#     angle = jnp.zeros((N, 6))
-#     CSD = createControlSurfaceJ20()
-#     deltaT = timeLen/N

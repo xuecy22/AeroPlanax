@@ -41,7 +41,7 @@ class FDM6DOF:
     motionState: MotionState
     xdot: jnp.ndarray
 
-def createFDM6DOF(state0: MotionState = None, airframe: plane_params.J20PlaneParams = None):
+def createFDM6DOF(state0: MotionState = None, airframe: plane_params.CanardPlaneParams = None):
     """仿真时间 无人机状态 气动 舵 敏感器...
     构造函数 状态为 UAV 动力学状态，包括 3 维位置,3 维速度,4 维姿态四元数,3 维姿态角速度,3 维加速度
 
@@ -65,7 +65,7 @@ def createFDM6DOF(state0: MotionState = None, airframe: plane_params.J20PlanePar
     # self.trueState = MsgStates()
     # self.update_true_state()
 
-def update_motionstate(state, deltaT: float, forcesMoments: jnp.ndarray, airframe: plane_params.J20PlaneParams):
+def update_motionstate(state, deltaT: float, forcesMoments: jnp.ndarray, airframe: plane_params.CanardPlaneParams):
     """飞机状态更新
 
     Args:
@@ -111,7 +111,7 @@ def update_motionstate(state, deltaT: float, forcesMoments: jnp.ndarray, airfram
     # self.state.velocity += self.state.accel * Ts
     # self.state.position += self.state.velocity * Ts
 
-def derivatives(state, t, forcesMoments, UAV: plane_params.J20PlaneParams):
+def derivatives(state, t, forcesMoments, UAV: plane_params.CanardPlaneParams):
     """动力学方程
 
     Args:

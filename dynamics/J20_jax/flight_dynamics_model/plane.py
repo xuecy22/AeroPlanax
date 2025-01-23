@@ -2,9 +2,9 @@ import flax.struct
 import jax.numpy as jnp
 import jax
 import flax
-from . import fdm6DOF, control_surfaceJ20, plane_params, turbo_engineSW190B, fuel_tank
-from .aero_dynamicsJ20 import Aero_Forces_Torques
-from ..lib import rigid_body, wind_sim
+from . import control_surface, fdm6DOF, plane_params, turbo_engineSW190B
+from .aero_dynamics import Aero_Forces_Torques
+from ..lib import wind_sim
 from ..lib.attitude import attitude as att
 from ..lib.atmos.ISA import ISA
 from ..lib.gravity.gravityEGM96 import gravityEGM96
@@ -53,7 +53,7 @@ def createInputChannels(input: jnp.ndarray = jnp.zeros(12)):
 
 @flax.struct.dataclass
 class Plane:
-    planeParams: plane_params.J20PlaneParams
+    planeParams: plane_params.CanardPlaneParams
     # Initialize the position of the UAV, set the origin of the NED frame to the initial position
     positionLLA: position_LLA.PositionLLA
     # Initialize attitude RPY
@@ -74,7 +74,7 @@ class Plane:
     alphadot: float
     betadot: float
     controlInputPWM: InputChannels
-    controlSurface: control_surfaceJ20.ControlSurfaceJ20
+    controlSurface: control_surface.ControlSurface
     engine: turbo_engineSW190B.TurboEngineSW190B
 
 def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
@@ -85,7 +85,7 @@ def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
                 fuelVolume=-1,
                 CSD=jnp.zeros(6)
                 ):
-    '''J20 dynamic model initialization. Initial LLA is set to be the origin of NED frame.
+    ''' dynamic model initialization. Initial LLA is set to be the origin of NED frame.
     Args:
         latitude (float, optional): 纬度, unit in degree. Defaults to 31.835.
         longitude (float, optional): 经度, unit in degree. Defaults to 117.089.
@@ -135,7 +135,7 @@ def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
     betadot = 0.0
 
     controlInputPWM = createInputChannels()
-    controlSurface = control_surfaceJ20.createControlSurfaceJ20(delta=CSD)
+    controlSurface = control_surface.createControlSurface(delta=CSD)
     engine = turbo_engineSW190B.createTurboEngineSW190B(controlInputPWM.Throttle,
                                                         pos=jnp.array([-2.53, 0, 0]), azimuth=0, elevation=0)
     state = Plane(
@@ -191,7 +191,7 @@ def update(state, deltaT, cmdInput):
         CSD[4]  Left vertical tail LVT control surface angle, unit in degree
         CSD[5]  Right vertical tail RVT control surface angle, unit in degree
     '''
-    controlSurface, CSD, servoCurrent = control_surfaceJ20.setAngleByPWM(
+    controlSurface, CSD, servoCurrent = control_surface.setAngleByPWM(
         state.controlSurface, deltaT, CSDPWM, state.dynamicPressure, state.alpha, state.beta)
 
     '''

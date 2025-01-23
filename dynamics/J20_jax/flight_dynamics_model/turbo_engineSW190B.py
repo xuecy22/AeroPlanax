@@ -3,47 +3,14 @@ import jax
 import flax
 import jax.numpy as jnp
 import scipy.io as scio
+from ..lib.utils import linear_interp
 
-
-@jax.jit
-def linear_interp(grid_x, values, point):
-    """
-    一维线性插值函数
-
-    参数:
-    - grid_x: 网格坐标（升序排列），形状为 (nx,)
-    - values: 网格点的值，形状为 (nx,)
-    - point: 插值点的坐标，标量
-
-    返回:
-    - 插值后的值，标量
-    """
-    x = point
-    # 找到插值点所在的索引
-    ix = jnp.searchsorted(grid_x, x) - 1
-
-    # 确保索引在有效范围内
-    ix = jnp.clip(ix, 0, len(grid_x) - 2)
-
-    # 获取两个邻近点的值
-    x0 = grid_x[ix]
-    x1 = grid_x[ix + 1]
-    y0 = values[ix]
-    y1 = values[ix + 1]
-
-    # 计算插值权重
-    t = (x - x0) / (x1 - x0)
-
-    # 执行线性插值
-    y = y0 * (1 - t) + y1 * t
-
-    return y
 
 curr_path = os.path.dirname(__file__)
-data_path = os.path.join(curr_path, "TurboEngineSW190B.mat")
-coefJ20 = scio.loadmat(data_path)
-RPM = jnp.array(coefJ20["RPM"].squeeze())
-Throttle = jnp.array(coefJ20["Throttle"].squeeze())
+data_path = os.path.join(curr_path, "data/TurboEngineSW190B.mat")
+coefCanardPlane = scio.loadmat(data_path)
+RPM = jnp.array(coefCanardPlane["RPM"].squeeze())
+Throttle = jnp.array(coefCanardPlane["Throttle"].squeeze())
 
 @jax.jit
 def thr2rpm(point):

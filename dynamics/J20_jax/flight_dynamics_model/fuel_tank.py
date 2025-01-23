@@ -4,14 +4,14 @@ from ..lib import rigid_body
 import flax
 import jax
 
-Length = 0.3   # J20 fuel tank length, unit in meters
-Width = 0.18   # J20 fuel tank width, unit in meters
-Height = 0.13   # J20 fuel tank height, unit in meters
-Capacity = Length*Width*Height*1000   # J20 fuel tank capacity, unit in liters
+Length = 0.3   # fuel tank length, unit in meters
+Width = 0.18   # fuel tank width, unit in meters
+Height = 0.13   # fuel tank height, unit in meters
+Capacity = Length*Width*Height*1000   # fuel tank capacity, unit in liters
 # Relative position from plane origin to fuel tank origin in Body frame, unit in meters
 rFuel = jnp.array([-1.4778, 0, 0])
-mShell = 0.02   # J20 fuel tank shell mass, unit in kg
-# J20 fuel tank shell inertia, unit in kg.m^2
+mShell = 0.02   # fuel tank shell mass, unit in kg
+# fuel tank shell inertia, unit in kg.m^2
 S_LW = Length*Width
 S_WH = Width*Height
 S_HL = Height*Length
@@ -20,7 +20,7 @@ Jy_Shell = mShell*S_HL / (S_LW+S_WH+S_HL)*(Length**2+Height**2)/12.0
 Jz_Shell = mShell*S_LW / (S_LW+S_WH+S_HL)*(Length**2+Width**2)/12.0
 
 @flax.struct.dataclass
-class J20FuelTank:
+class FuelTank:
     """_summary_
     """
     density: float
@@ -35,7 +35,7 @@ class J20FuelTank:
     
 
 def createFueltank(volume=Capacity, fuel_density=0.85):
-    """J20FuelTank
+    """FuelTank
 
     Args:
         volume (float, optional): Fuel tank volume, unit in L. Defaults to Capacity.
@@ -58,7 +58,7 @@ def createFueltank(volume=Capacity, fuel_density=0.85):
     inertia = rigid_body.createRigidbody(m=M*percent+mShell, Jx=Jx*percent+Jx_Shell,
                                 Jy=Jy*percent+Jy_Shell, Jz=Jz*percent+Jz_Shell)
     percent *= 100.0
-    state = J20FuelTank(
+    state = FuelTank(
         density=density,
         volume=volume,
         M=M,
@@ -82,7 +82,7 @@ def consumpFuel(state, deltaT, SFC):
     volume = jax.lax.select(volume < 0, 0.0, volume)
     percent = volume / Capacity
     # self.mFuel = self.volume*self.density
-    # self.mass = self.mFuel + J20FuelTank.mShell
+    # self.mass = self.mFuel + FuelTank.mShell
     # Update inertia
     mass = state.fullInertia.mass * percent + mShell
     J = state.fullInertia._J * percent \

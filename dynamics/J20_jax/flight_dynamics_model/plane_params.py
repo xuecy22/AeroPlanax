@@ -24,8 +24,8 @@ rLMGR = jnp.array([-1.703, -0.15, 0.15])
 rRMGR = jnp.array([-1.703, 0.15, 0.15])
 
 @flax.struct.dataclass
-class J20PlaneParams:
-    fueltank: fuel_tank.J20FuelTank
+class CanardPlaneParams:
+    fueltank: fuel_tank.FuelTank
     inertia: rigid_body.RigidBody
 
 def createPlaneParams(fuel=-1):
@@ -37,7 +37,7 @@ def createPlaneParams(fuel=-1):
                             lambda: fuel_tank.createFueltank())
     inertia = rigid_body.createCombination(
         emptyInertia, jnp.array([0, 0, 0]), fueltank.inertia, fuel_tank.rFuel)
-    state = J20PlaneParams(
+    state = CanardPlaneParams(
         fueltank=fueltank,
         inertia=inertia
     )
