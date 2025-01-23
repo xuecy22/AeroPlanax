@@ -16,7 +16,7 @@ def unreach_heading_fn(
     """
     End up the simulation if the aircraft didn't reach the target heading or attitude in limited time.
     """
-    plane_state: FighterPlaneState = state.state
+    plane_state: FighterPlaneState = state.plane_state
     yaw = plane_state.yaw[agent_id]
     altitude = plane_state.altitude[agent_id]
     vt = plane_state.vt[agent_id]

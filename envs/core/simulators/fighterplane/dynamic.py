@@ -2,11 +2,11 @@ import jax
 import jax.numpy as jnp
 from flax import struct
 from . import aero_data as hifi_F16
-from ...base_dataclass import BaseState, BaseControlState
+from ...base_dataclass import BasePlaneState, BaseControlState
 
 
 @struct.dataclass
-class FighterPlaneState(BaseState):
+class FighterPlaneState(BasePlaneState):
     # posture
     alpha: jax.typing.ArrayLike = 0
     beta: jax.typing.ArrayLike = 0

@@ -12,7 +12,7 @@ def overload_fn(
     """
     End up the simulation if acceleration are too high.
     """
-    plane_state: FighterPlaneState = state.state
+    plane_state: FighterPlaneState = state.plane_state
     done = plane_state.overload[agent_id] > max_overload 
     success = False
     return done, success

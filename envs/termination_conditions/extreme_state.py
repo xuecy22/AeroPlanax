@@ -16,7 +16,7 @@ def extreme_state_fn(
     """
     End up the simulation if the aircraft is on an extreme state.
     """
-    plane_state: FighterPlaneState = state.state
+    plane_state: FighterPlaneState = state.plane_state
     alpha: float = plane_state.alpha[agent_id] * 180 / jnp.pi
     beta: float = plane_state.beta[agent_id] * 180 / jnp.pi
     mask1 = (alpha < min_alpha) | (alpha > max_alpha)

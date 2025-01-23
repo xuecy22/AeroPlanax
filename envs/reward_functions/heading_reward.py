@@ -13,9 +13,9 @@ def heading_reward_fn(
     Measure the difference between the current heading and the target heading
     """
     # TODO: data type check before computing reward
-    altitude = state.state.altitude
-    yaw = state.state.yaw
-    vt = state.state.vt
+    altitude = state.plane_state.altitude
+    yaw = state.plane_state.yaw
+    vt = state.plane_state.vt
     delta_altitude = (altitude - state.target_altitude) * 0.3048 / 1000
     delta_heading = wrap_PI(yaw - state.target_heading) / jnp.pi
     delta_vt = (vt - state.target_vt) * 0.3048 / 340

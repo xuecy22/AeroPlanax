@@ -12,7 +12,7 @@ def high_speed_fn(
     """
     End up the simulation if speed are too high.
     """
-    plane_state: FighterPlaneState = state.state
+    plane_state: FighterPlaneState = state.plane_state
     velocity: float = plane_state.vt[agent_id] * 0.3048 / 340
     done = velocity > max_velocity
     success = False

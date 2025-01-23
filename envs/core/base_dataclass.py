@@ -10,7 +10,7 @@ class AeroplaneStatus(enum.IntEnum):
 
 
 @struct.dataclass
-class BaseState:
+class BasePlaneState:
     # Position
     north: jax.typing.ArrayLike = 0
     east: jax.typing.ArrayLike = 0

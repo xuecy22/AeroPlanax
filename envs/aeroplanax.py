@@ -7,12 +7,12 @@ import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
 from .core.simulators import fighterplane, canardplane, uav
-from .core.base_dataclass import BaseState, BaseControlState
+from .core.base_dataclass import BasePlaneState, BaseControlState
 
 
 @struct.dataclass
 class EnvState:
-    state: BaseState
+    plane_state: BasePlaneState
     control_state: BaseControlState
     # task state
     done: bool
@@ -140,23 +140,25 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
 
         actions: BaseControlState = self._decode_actions(key, state, actions)
 
-        def step_sim_fn(states: BaseState, _):
+        def step_sim_fn(plane_states: BasePlaneState, _):
             if self.agent_type == 0:
-                next_states = jax.vmap(fighterplane.update, in_axes=(0, 0, None))(states, actions, 1 / params.sim_freq)
+                next_plane_states = jax.vmap(
+                    fighterplane.update, in_axes=(0, 0, None)
+                )(plane_states, actions, 1 / params.sim_freq)
             elif self.agent_type == 1:
                 raise NotImplementedError
             elif self.agent_type == 2:
                 raise NotImplementedError
             # TODO: check collision & missile hit
-            return next_states, True
+            return next_plane_states, True
 
         new_plane_state, _ = jax.lax.scan(
             step_sim_fn,
-            init=state.state,
+            init=state.plane_state,
             xs=None,
             length=self.agent_interaction_steps,
         )
-        state_st = state.replace(state=new_plane_state)
+        state_st = state.replace(plane_state=new_plane_state)
         state_st = self._step_task(key, state_st, actions, params)
 
         obs_st = self._get_obs(state_st, params)
@@ -198,7 +200,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         elif self.agent_type == 2:
             raise NotImplementedError
         env_state = EnvState(
-            state=aeroplane_state,
+            plane_state=aeroplane_state,
             control_state=aeroplane_control_state,
             done=False,
             success=False,

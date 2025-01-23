@@ -33,7 +33,7 @@ class HeadingTaskState(EnvState):
     @classmethod
     def create(cls, env_state: EnvState, extra_state: Array):
         return cls(
-            state=env_state.state,
+            plane_state=env_state.plane_state,
             control_state=env_state.control_state,
             done=env_state.done,
             success=env_state.success,
@@ -115,12 +115,12 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         delta_altitude = jax.random.uniform(key_altitude_increment, minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
         delta_vt = jax.random.uniform(key_vt_increment, minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
 
-        target_altitude = jnp.mean(state.state.altitude) + delta_altitude
-        target_heading = wrap_PI(jnp.mean(state.state.yaw) + delta_heading)
-        target_vt = jnp.mean(state.state.vt) + delta_vt
+        target_altitude = jnp.mean(state.plane_state.altitude) + delta_altitude
+        target_heading = wrap_PI(jnp.mean(state.plane_state.yaw) + delta_heading)
+        target_vt = jnp.mean(state.plane_state.vt) + delta_vt
 
         state = state.replace(
-            state=state.state.replace(
+            plane_state=state.plane_state.replace(
                 altitude=altitude,
                 vt=vt,
             ),
@@ -169,12 +169,12 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
             15. ego_R                  (unit: rad/s)
         """
 
-        altitude = state.state.altitude
-        roll, pitch, yaw = state.state.roll, state.state.pitch, state.state.yaw
-        vt = state.state.vt
-        alpha = state.state.alpha
-        beta = state.state.beta
-        P, Q, R = state.state.P, state.state.Q, state.state.R
+        altitude = state.plane_state.altitude
+        roll, pitch, yaw = state.plane_state.roll, state.plane_state.pitch, state.plane_state.yaw
+        vt = state.plane_state.vt
+        alpha = state.plane_state.alpha
+        beta = state.plane_state.beta
+        P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
 
         norm_delta_altitude = (altitude - state.target_altitude) * 0.3048 / 1000
         norm_delta_heading = wrap_PI((yaw - state.target_heading))

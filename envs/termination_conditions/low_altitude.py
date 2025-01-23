@@ -1,6 +1,5 @@
 from typing import Tuple
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
-from ..core.base_dataclass import BaseState
 
 
 def low_altitude_fn(
@@ -12,7 +11,7 @@ def low_altitude_fn(
     """
     End up the simulation if altitude are too low.
     """
-    plane_state: BaseState = state.state
+    plane_state = state.plane_state
     altitude: float = plane_state.altitude[agent_id]
     done = altitude < altitude_limit
     success = False
