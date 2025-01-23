@@ -158,7 +158,10 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             xs=None,
             length=self.agent_interaction_steps,
         )
-        state_st = state.replace(plane_state=new_plane_state)
+        state_st = state.replace(
+            plane_state=new_plane_state,
+            time=state.time + 1
+        )
         state_st = self._step_task(key, state_st, actions, params)
 
         obs_st = self._get_obs(state_st, params)
