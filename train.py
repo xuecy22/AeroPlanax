@@ -13,15 +13,14 @@ from datetime import datetime
 import optax
 from flax.linen.initializers import constant, orthogonal
 import functools
-from typing import Sequence, NamedTuple, Any, Dict
+from typing import Sequence, NamedTuple, Tuple, Optional, Union, Any, Dict
 from flax.training import checkpoints
 from flax.training.train_state import TrainState
 import distrax
 import tensorboardX
 import jax.experimental
-import gymnax
-from gymnax.wrappers.purerl import FlattenObservationWrapper, LogWrapper
-from envs.aeroplanax import AeroPlanax
+from envs.wrappers import LogWrapper
+from envs.aeroplanax_heading import AeroPlanaxHeadingEnv
 
 
 class ScannedRNN(nn.Module):
@@ -101,17 +100,28 @@ class Transition(NamedTuple):
     obs: jnp.ndarray
     info: jnp.ndarray
 
+
+def batchify(x: dict, agent_list, num_envs, num_actors):
+    x = jnp.stack([x[a] for a in agent_list])
+    #print('batchify', x.shape)
+    return x.reshape((num_actors * num_envs, -1))
+
+
+def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
+    x = x.reshape((num_actors, num_envs, -1))
+    return {a: x[i] for i, a in enumerate(agent_list)}
+
 def make_train(config):
+    env = AeroPlanaxHeadingEnv()
+    env_params = env.default_params
+    env = LogWrapper(env)
+    config["NUM_ACTORS"] = env.num_agents
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
     config["MINIBATCH_SIZE"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
+        config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
-    env = AeroPlanax()
-    env_params = env.default_params()
-    env = FlattenObservationWrapper(env)
-    env = LogWrapper(env)
 
     def linear_schedule(count):
         frac = (
@@ -123,11 +133,11 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
-        network = ActorCriticRNN(env.action_space(env_params).shape[0], config=config)
+        network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
         rng, _rng = jax.random.split(rng)
         init_x = (
             jnp.zeros(
-                (1, config["NUM_ENVS"], *env.observation_space(env_params).shape)
+                (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
             ),
             jnp.zeros((1, config["NUM_ENVS"])),
         )
@@ -152,7 +162,7 @@ def make_train(config):
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
-        obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
+        obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
         init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
         # INIT Tensorboard
@@ -186,11 +196,15 @@ def make_train(config):
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
                 obsv, env_state, reward, done, info = jax.vmap(
-                    env.step, in_axes=(0, 0, 0, None)
-                )(rng_step, env_state, action, env_params)
+                    env.step, in_axes=(0, 0, 0)
+                )(rng_step, env_state, 
+                  unbatchify(action, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]))
+                reward = batchify(reward, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
                 transition = Transition(
                     last_done, action, value, reward, log_prob, last_obs, info
                 )
+                obsv = batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
+                done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
                 runner_state = (train_state, env_state, obsv, done, hstate, rng)
                 return runner_state, transition
 
@@ -393,7 +407,7 @@ def make_train(config):
         runner_state = (
             train_state,
             env_state,
-            obsv,
+            batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]),
             jnp.zeros((config["NUM_ENVS"]), dtype=bool),
             init_hstate,
             _rng,
@@ -447,7 +461,7 @@ wandb.init(
 rng = jax.random.PRNGKey(seed)
 train_jit = jax.jit(make_train(config))
 out = train_jit(rng)
-wandb.finish()
+# wandb.finish()
 
 output_dir = config["OUTPUTDIR"]
 Path(output_dir).mkdir(parents=True, exist_ok=True)

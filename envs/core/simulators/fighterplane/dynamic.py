@@ -16,6 +16,11 @@ class FighterPlaneState(BasePlaneState):
     P: jax.typing.ArrayLike = 0
     Q: jax.typing.ArrayLike = 0
     R: jax.typing.ArrayLike = 0
+    # control state
+    T: jax.typing.ArrayLike = 0
+    el: jax.typing.ArrayLike = 0
+    ail: jax.typing.ArrayLike = 0
+    rud: jax.typing.ArrayLike = 0
     # acceleration
     overload: jax.typing.ArrayLike = 0
 
@@ -35,7 +40,11 @@ class FighterPlaneState(BasePlaneState):
             P=state[10],
             Q=state[11],
             R=state[12],
-            overload=state[13],
+            T=state[13],
+            el=state[14],
+            ail=state[15],
+            rud=state[16],
+            overload=state[17],
         )
 
 
@@ -267,6 +276,10 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
                     state.roll, state.pitch, state.yaw,
                     state.vt, state.alpha, state.beta,
                     state.P, state.Q, state.R))
+    T = 0.9 * state.T + 0.1 * action.throttle * 0.225 * 76300 / 0.3048
+    el = 0.9 * state.el + 0.1 * action.elevator * 45
+    ail = 0.9 * state.ail + 0.1 * action.aileron * 45
+    rud = 0.9 * state.rud + 0.1 * action.rudder * 45
     u = jnp.hstack((action.throttle, action.elevator, action.aileron, action.rudder,
                     action.leading_edge_flap))
     xu = jnp.hstack((x, u))
@@ -280,6 +293,7 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
         roll=new_x[3], pitch=new_x[4], yaw=new_x[5],
         vt=new_x[6], alpha=new_x[7], beta=new_x[8],
         P=new_x[9], Q=new_x[10], R=new_x[11],
+        T=T, el=el, ail=ail, rud=rud,
         overload=overload
     )
     return state
