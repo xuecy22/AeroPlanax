@@ -181,7 +181,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         obs = jax.tree.map(
             lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
         )
-        info = {"success": state.success}
+        info["success"] = state.success
 
         return obs, state, rewards, dones, info
 
