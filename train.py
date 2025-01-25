@@ -111,7 +111,7 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     x = x.reshape((num_actors, num_envs, -1))
     return {a: x[i] for i, a in enumerate(agent_list)}
 
-def make_train(config):
+def make_train(config, params=None):
     env = AeroPlanaxHeadingEnv()
     env_params = env.default_params
     env = LogWrapper(env)
@@ -134,15 +134,18 @@ def make_train(config):
     def train(rng):
         # INIT NETWORK
         network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
-        rng, _rng = jax.random.split(rng)
-        init_x = (
-            jnp.zeros(
-                (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
-            ),
-            jnp.zeros((1, config["NUM_ENVS"])),
-        )
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-        network_params = network.init(_rng, init_hstate, init_x)
+        if params is None:
+            rng, _rng = jax.random.split(rng)
+            init_x = (
+                jnp.zeros(
+                    (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
+                ),
+                jnp.zeros((1, config["NUM_ENVS"])),
+            )
+            init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+            network_params = network.init(_rng, init_hstate, init_x)
+        else:
+            network_params = params
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -444,6 +447,9 @@ config = {
     "LOGDIR": "results/" + str_date_time + "/logs",
 }
 
+if "LOADDIR" in config:
+    params = checkpoints.restore_checkpoint(os.path.abspath(config['LOADDIR']), target=None)
+
 seed = config['SEED']
 wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
 wandb.init(
@@ -459,9 +465,9 @@ wandb.init(
 )
 
 rng = jax.random.PRNGKey(seed)
-train_jit = jax.jit(make_train(config))
+train_jit = jax.jit(make_train(config, params))
 out = train_jit(rng)
-# wandb.finish()
+wandb.finish()
 
 output_dir = config["OUTPUTDIR"]
 Path(output_dir).mkdir(parents=True, exist_ok=True)
