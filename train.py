@@ -14,13 +14,13 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 import functools
 from typing import Sequence, NamedTuple, Tuple, Optional, Union, Any, Dict
-from flax.training import checkpoints
 from flax.training.train_state import TrainState
 import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
 from envs.aeroplanax_heading import AeroPlanaxHeadingEnv
+import orbax.checkpoint as ocp
 
 
 class ScannedRNN(nn.Module):
@@ -111,7 +111,7 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     x = x.reshape((num_actors, num_envs, -1))
     return {a: x[i] for i, a in enumerate(agent_list)}
 
-def make_train(config, params=None):
+def make_train(config):
     env = AeroPlanaxHeadingEnv()
     env_params = env.default_params
     env = LogWrapper(env)
@@ -122,30 +122,17 @@ def make_train(config, params=None):
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
-
-    def linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["LR"] * frac
-
-    def train(rng):
-        # INIT NETWORK
+    if "LOADDIR" in config:
         network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
-        if params is None:
-            rng, _rng = jax.random.split(rng)
-            init_x = (
-                jnp.zeros(
-                    (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
-                ),
-                jnp.zeros((1, config["NUM_ENVS"])),
-            )
-            init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-            network_params = network.init(_rng, init_hstate, init_x)
-        else:
-            network_params = params
+        rng = jax.random.PRNGKey(42)
+        init_x = (
+            jnp.zeros(
+                (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
+            ),
+            jnp.zeros((1, config["NUM_ENVS"])),
+        )
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        network_params = network.init(rng, init_hstate, init_x)
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -161,7 +148,54 @@ def make_train(config, params=None):
             params=network_params,
             tx=tx,
         )
+        state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
+        ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+        checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
+    else:
+        checkpoint = None
 
+    def linear_schedule(count):
+        frac = (
+            1.0
+            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+            / config["NUM_UPDATES"]
+        )
+        return config["LR"] * frac
+
+    def train(rng):
+        # INIT NETWORK
+        network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
+        rng, _rng = jax.random.split(rng)
+        init_x = (
+            jnp.zeros(
+                (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
+            ),
+            jnp.zeros((1, config["NUM_ENVS"])),
+        )
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        network_params = network.init(_rng, init_hstate, init_x)
+        if config["ANNEAL_LR"]:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(learning_rate=linear_schedule, eps=1e-5),
+            )
+        else:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(config["LR"], eps=1e-5),
+            )
+        train_state = TrainState.create(
+            apply_fn=network.apply,
+            params=network_params,
+            tx=tx,
+        )
+        if checkpoint is not None:
+            params = checkpoint["params"]
+            opt_state = checkpoint["opt_state"]
+            train_state = train_state.replace(params=params, opt_state=opt_state)
+            start_epoch = checkpoint["epoch"]
+        else:
+            start_epoch = 0
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
@@ -402,7 +436,7 @@ def make_train(config, params=None):
                         metric["success"][metric["returned_episode"]].mean(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
-            update_steps = update_steps + 1
+            update_steps = update_steps + 1    
             runner_state = (train_state, env_state, last_obs, last_done, hstate, rng)
             return (runner_state, update_steps), metric
 
@@ -416,7 +450,7 @@ def make_train(config, params=None):
             _rng,
         )
         runner_state, metric = jax.lax.scan(
-            _update_step, (runner_state, 0), None, config["NUM_UPDATES"]
+            _update_step, (runner_state, start_epoch), None, config["NUM_UPDATES"]
         )
         return {"runner_state": runner_state, "metric": metric}
 
@@ -445,10 +479,9 @@ config = {
     "DEBUG": True,
     "OUTPUTDIR": "results/" + str_date_time,
     "LOGDIR": "results/" + str_date_time + "/logs",
+    "SAVEDIR": "results/" + str_date_time + "/checkpoints",
+    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-01-26-04-39/checkpoints/checkpoint_epoch_1" 
 }
-
-if "LOADDIR" in config:
-    params = checkpoints.restore_checkpoint(os.path.abspath(config['LOADDIR']), target=None)
 
 seed = config['SEED']
 wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
@@ -464,13 +497,27 @@ wandb.init(
     reinit=True,
 )
 
+output_dir = config["OUTPUTDIR"]
+Path(output_dir).mkdir(parents=True, exist_ok=True)
+save_dir = config["SAVEDIR"]
+Path(save_dir).mkdir(parents=True, exist_ok=True)
+
 rng = jax.random.PRNGKey(seed)
-train_jit = jax.jit(make_train(config, params))
+train_jit = jax.jit(make_train(config))
 out = train_jit(rng)
 wandb.finish()
 
-output_dir = config["OUTPUTDIR"]
-Path(output_dir).mkdir(parents=True, exist_ok=True)
+ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+checkpoint = {
+    "params": out['runner_state'][0][0].params,
+    "opt_state": out['runner_state'][0][0].opt_state,
+    "epoch": jnp.array(out['runner_state'][1])
+}
+checkpoint_path = os.path.abspath(os.path.join(config["SAVEDIR"], f"checkpoint_epoch_{out['runner_state'][1]}"))
+ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
+ckptr.wait_until_finished()
+print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
+
 plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
 plt.xlabel("Update Step")
 plt.ylabel("Return")
@@ -480,5 +527,3 @@ plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
 plt.xlabel("Update Step")
 plt.ylabel("Return")
 plt.savefig(output_dir + '/returned_episode_lengths.png')
-checkpoint_dir = os.path.abspath(output_dir)
-checkpoints.save_checkpoint(checkpoint_dir, out['runner_state'][0][0].params, step=out['metric']["returned_episode_lengths"].shape[0])
