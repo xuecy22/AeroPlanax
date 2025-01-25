@@ -10,8 +10,8 @@ def unreach_heading_fn(
     state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
-    max_check_interval: int = 500,
-    min_check_interval: int = 10
+    max_check_interval: int = 50,
+    min_check_interval: int = 6
 ) -> Tuple[bool, bool]:
     """
     End up the simulation if the aircraft didn't reach the target heading or attitude in limited time.
@@ -22,6 +22,8 @@ def unreach_heading_fn(
     vt = plane_state.vt[agent_id]
     check_time = state.time
     # 判断时间
+    max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
+    max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
     mask1 = check_time >= max_check_interval
     mask2 = check_time >= min_check_interval
     # 判断是否到达target_heading

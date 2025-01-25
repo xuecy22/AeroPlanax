@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Callable, Generic, Optional, Tuple, TypeVar
 import chex
 from flax import struct
 import jax
+from jax import lax
 import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
@@ -27,7 +28,7 @@ class EnvParams(environment.EnvParams):
     agent_type: int = 0  # 0: fighterplane, 1: canardplane, 2: uav  TODO: heterogeneous agents
     max_steps: int = 100
     sim_freq: int = 50
-    agent_interaction_steps: int = 10
+    agent_interaction_steps: int = 1
     map_size_enu: Tuple[float, float, float] = (200., 200., 10.)    # unit: km
     map_origin_geodetic: Tuple[float, float, float] = (0., 0., 0.)  # unit: deg/km
 
@@ -169,7 +170,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         state_st, dones = self.get_termination(state_st, params)
         dones["__all__"] = state_st.done
         rewards = self.get_reward(state_st, params)
-        info = {}
+        info = {"success": state_st.success}
 
         # Auto-reset environment based on termination
         key, key_reset = jax.random.split(key)
@@ -181,9 +182,8 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         obs = jax.tree.map(
             lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
         )
-        info["success"] = state.success
 
-        return obs, state, rewards, dones, info
+        return lax.stop_gradient(obs), lax.stop_gradient(state), rewards, dones, info
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _init_state(
@@ -195,7 +195,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         if self.agent_type == 0:
             aeroplane_state = jax.vmap(
                 fighterplane.FighterPlaneState.create
-            )(jnp.zeros((self.num_agents, 14)))
+            )(jnp.zeros((self.num_agents, 18)))
             aeroplane_control_state = jax.vmap(
                 fighterplane.FighterPlaneControlState.create
             )(jnp.zeros((self.num_agents, 4)))
@@ -292,7 +292,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 termination_condition, in_axes=(None, None, 0)
             )(state, params, jnp.arange(self.num_agents))
             dones = jnp.logical_or(dones, new_done)
-            successes = jnp.logical_and(successes, new_success)
+            successes = jnp.logical_or(successes, new_success)
             # TODO: early stop when all agents are done
         # modify state
         state = state.replace(
