@@ -23,7 +23,7 @@ def unreach_heading_fn(
     check_time = state.time
     # 判断时间
     max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
-    max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
+    min_check_interval = min_check_interval * params.sim_freq / params.agent_interaction_steps
     mask1 = check_time <= max_check_interval
     mask2 = check_time >= min_check_interval
     # 判断是否到达target_heading
