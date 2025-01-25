@@ -24,7 +24,7 @@ def unreach_heading_fn(
     # 判断时间
     max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
     max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
-    mask1 = check_time >= max_check_interval
+    mask1 = check_time <= max_check_interval
     mask2 = check_time >= min_check_interval
     # 判断是否到达target_heading
     mask3 = jnp.abs(wrap_PI(yaw - state.target_heading)) < jnp.pi / 36
@@ -34,7 +34,7 @@ def unreach_heading_fn(
     mask5 = jnp.abs(vt - state.target_vt) < 20
 
     # 当达到目标且时间符合要求时, 任务成功
-    success = (~mask1) & mask2 & mask3 & mask4 & mask5
+    success = (mask1) & mask2 & mask3 & mask4 & mask5
     # 任务成功或超时, 则任务结束
-    done = success | mask1
+    done = success | jnp.logical_not(mask1)
     return done, success

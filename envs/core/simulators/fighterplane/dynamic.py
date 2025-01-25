@@ -280,8 +280,7 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
     el = 0.9 * state.el + 0.1 * action.elevator * 45
     ail = 0.9 * state.ail + 0.1 * action.aileron * 45
     rud = 0.9 * state.rud + 0.1 * action.rudder * 45
-    u = jnp.hstack((action.throttle, action.elevator, action.aileron, action.rudder,
-                    action.leading_edge_flap))
+    u = jnp.hstack((T, el, ail, rud, action.leading_edge_flap))
     xu = jnp.hstack((x, u))
     xdot = nlplant(xu)
     nx_cg, ny_cg, nz_cg = accels(xu[3], xu[4], xu[7], xu[8], xu[6], 

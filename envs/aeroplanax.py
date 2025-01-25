@@ -183,7 +183,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
         )
 
-        return lax.stop_gradient(obs), lax.stop_gradient(state), rewards, dones, info
+        return lax.stop_gradient(obs), state, rewards, dones, info
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _init_state(
