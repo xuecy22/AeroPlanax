@@ -1,16 +1,18 @@
-import jax.numpy as jnp
+from typing import Tuple
+from ..aeroplanax import TEnvState, TEnvParams, AgentID
 
-params = {
-    'altitude_limit': 2500
-}
 
-def LowAltitude(state):
+def low_altitude_fn(
+    state: TEnvState,
+    params: TEnvParams,
+    agent_id: AgentID,
+    altitude_limit: float = 2500
+) -> Tuple[bool, bool]:
     """
-    LowAltitude
     End up the simulation if altitude are too low.
     """
-    altitude = state.altitude
-    bad_done = (altitude - params['altitude_limit']) < 0
-    done = jnp.zeros_like(bad_done)
-    time_out = jnp.zeros_like(bad_done)
-    return bad_done, done, time_out
+    plane_state = state.plane_state
+    altitude: float = plane_state.altitude[agent_id]
+    done = altitude < altitude_limit
+    success = False
+    return done, success

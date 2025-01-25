@@ -1,17 +1,18 @@
-import jax.numpy as jnp
+from typing import Tuple
+from ..aeroplanax import TEnvState, TEnvParams, AgentID
+from ..core.simulators.fighterplane.dynamic import FighterPlaneState
 
 
-params = {
-    'acceleration_limit': 10
-}
-
-
-def Overload(state):
+def overload_fn(
+    state: TEnvState,
+    params: TEnvParams,
+    agent_id: AgentID,
+    max_overload: float = 10
+) -> Tuple[bool, bool]:
     """
-    Overload
     End up the simulation if acceleration are too high.
     """
-    bad_done = state.overload > params['acceleration_limit'] 
-    done = jnp.zeros_like(bad_done)
-    time_out = jnp.zeros_like(bad_done)
-    return bad_done, done, time_out
+    plane_state: FighterPlaneState = state.plane_state
+    done = plane_state.overload[agent_id] > max_overload 
+    success = False
+    return done, success

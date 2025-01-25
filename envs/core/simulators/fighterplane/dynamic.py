@@ -1,9 +1,68 @@
+import jax
 import jax.numpy as jnp
-from jax import jit
-from . import hifi_F16_AeroData as hifi_F16
+from flax import struct
+from . import aero_data as hifi_F16
+from ...base_dataclass import BasePlaneState, BaseControlState
 
 
-@jit
+@struct.dataclass
+class FighterPlaneState(BasePlaneState):
+    # posture
+    alpha: jax.typing.ArrayLike = 0
+    beta: jax.typing.ArrayLike = 0
+    # velocity
+    vt: jax.typing.ArrayLike = 0
+    # angular velocity
+    P: jax.typing.ArrayLike = 0
+    Q: jax.typing.ArrayLike = 0
+    R: jax.typing.ArrayLike = 0
+    # control state
+    T: jax.typing.ArrayLike = 0
+    el: jax.typing.ArrayLike = 0
+    ail: jax.typing.ArrayLike = 0
+    rud: jax.typing.ArrayLike = 0
+    # acceleration
+    overload: jax.typing.ArrayLike = 0
+
+    @classmethod
+    def create(cls, state: jax.Array):
+        return cls(
+            north=state[0],
+            east=state[1],
+            altitude=state[2],
+            roll=state[3],
+            pitch=state[4],
+            yaw=state[5],
+            status=state[6],
+            alpha=state[7],
+            beta=state[8],
+            vt=state[9],
+            P=state[10],
+            Q=state[11],
+            R=state[12],
+            T=state[13],
+            el=state[14],
+            ail=state[15],
+            rud=state[16],
+            overload=state[17],
+        )
+
+
+@struct.dataclass
+class FighterPlaneControlState(BaseControlState):
+    leading_edge_flap: jax.typing.ArrayLike = 0
+
+    @classmethod
+    def create(cls, action: jax.Array):
+        return cls(
+            throttle=action[0],
+            elevator=action[1],
+            aileron=action[2],
+            rudder=action[3],
+            leading_edge_flap=0,
+        )
+
+
 def atmos(alt, vt):
     # 根据高度和速度计算动压、马赫数
     rho0 = 2.377e-3
@@ -19,7 +78,7 @@ def atmos(alt, vt):
 
     return (mach, qbar, ps)
 
-@jit
+
 def accels(roll, pitch, alpha, beta, vt, alpha_dot, beta_dot, vt_dot, P, Q, R):
     # 根据飞行状态结算三轴过载
     grav = 32.174
@@ -38,7 +97,7 @@ def accels(roll, pitch, alpha, beta, vt, alpha_dot, beta_dot, vt_dot, P, Q, R):
     nz_cg = -1.0 / grav * (w_dot + P * vel_v - Q * vel_u) + jnp.cos(pitch) * jnp.cos(roll)
     return (nx_cg, ny_cg, nz_cg)
 
-@jit
+
 def nlplant(xu):
     xdot = jnp.zeros_like(xu)
     g = 32.17
@@ -211,22 +270,29 @@ def nlplant(xu):
 
     return xdot
 
-@jit
-def update(state, action, dt):
-    x = jnp.hstack((state.north, state.east, state.altitude, 
+
+def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float) -> FighterPlaneState:
+    x = jnp.hstack((state.north, state.east, state.altitude,
                     state.roll, state.pitch, state.yaw,
                     state.vt, state.alpha, state.beta,
                     state.P, state.Q, state.R))
-    T = 0.9 * state.T + 0.1 * action[0] * 0.225 * 76300 / 0.3048
-    el = 0.9 * state.el + 0.1 * action[1] * 45
-    ail = 0.9 * state.ail + 0.1 * action[2] * 45
-    rud = 0.9 * state.rud + 0.1 * action[3] * 45
-    u = jnp.hstack((T, el, ail, rud, state.lef))
+    T = 0.9 * state.T + 0.1 * action.throttle * 0.225 * 76300 / 0.3048
+    el = 0.9 * state.el + 0.1 * action.elevator * 45
+    ail = 0.9 * state.ail + 0.1 * action.aileron * 45
+    rud = 0.9 * state.rud + 0.1 * action.rudder * 45
+    u = jnp.hstack((T, el, ail, rud, action.leading_edge_flap))
     xu = jnp.hstack((x, u))
     xdot = nlplant(xu)
     nx_cg, ny_cg, nz_cg = accels(xu[3], xu[4], xu[7], xu[8], xu[6], 
                                  xdot[7], xdot[8], xdot[6], xu[9], xu[10], xu[11])
     overload = jnp.sqrt(nx_cg ** 2 + ny_cg ** 2 + nz_cg ** 2)
     new_x = x + xdot[:12] * dt
-    new_state = jnp.hstack((new_x, u, overload))
-    return new_state
+    state = state.replace(
+        north=new_x[0], east=new_x[1], altitude=new_x[2],
+        roll=new_x[3], pitch=new_x[4], yaw=new_x[5],
+        vt=new_x[6], alpha=new_x[7], beta=new_x[8],
+        P=new_x[9], Q=new_x[10], R=new_x[11],
+        T=T, el=el, ail=ail, rud=rud,
+        overload=overload
+    )
+    return state

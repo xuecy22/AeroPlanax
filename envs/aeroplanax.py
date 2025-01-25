@@ -1,6 +1,5 @@
-from pathlib import Path
-from datetime import datetime
-from typing import Any, Dict, Optional, Tuple, Union
+import functools
+from typing import Any, Dict, List, Callable, Generic, Optional, Tuple, TypeVar
 import chex
 from flax import struct
 import jax
@@ -8,349 +7,312 @@ from jax import lax
 import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
-from .tasks.heading_task import reset, get_obs, reward_functions, termination_conditions
-from .models.F16.F16_Dynamics import update
-from .utils.utils import enu_to_geodetic
+from .core.simulators import fighterplane, canardplane, uav
+from .core.base_dataclass import BasePlaneState, BaseControlState
 
 
 @struct.dataclass
-class EnvState(environment.EnvState):
-    north: jnp.ndarray
-    east: jnp.ndarray
-    altitude: jnp.ndarray
-    roll: jnp.ndarray
-    pitch: jnp.ndarray
-    yaw: jnp.ndarray
-    vt: jnp.ndarray
-    alpha: jnp.ndarray
-    beta: jnp.ndarray
-    P: jnp.ndarray
-    Q: jnp.ndarray
-    R: jnp.ndarray
-    T: jnp.ndarray
-    el: jnp.ndarray
-    ail: jnp.ndarray
-    rud: jnp.ndarray
-    lef: jnp.ndarray
-    overload: jnp.ndarray
-    target_altitude: jnp.ndarray
-    target_heading: jnp.ndarray
-    target_vt: jnp.ndarray
-    done: jnp.ndarray
-    bad_done: jnp.ndarray
-    time_out: jnp.ndarray
-    time: jnp.ndarray
+class EnvState:
+    plane_state: BasePlaneState
+    control_state: BaseControlState
+    # task state
+    done: bool
+    success: bool
+    time: int
 
-@struct.dataclass
+
+@struct.dataclass(frozen=True)
 class EnvParams(environment.EnvParams):
-    task: int = 0
-    model: int = 0
-    dt: float = 0.02
-    max_steps_in_episode: 2000
+    num_allies: int = 1
+    num_enemies: int = 0
+    agent_type: int = 0  # 0: fighterplane, 1: canardplane, 2: uav  TODO: heterogeneous agents
+    max_steps: int = 100
+    sim_freq: int = 50
+    agent_interaction_steps: int = 1
+    map_size_enu: Tuple[float, float, float] = (200., 200., 10.)    # unit: km
+    map_origin_geodetic: Tuple[float, float, float] = (0., 0., 0.)  # unit: deg/km
 
 
-class AeroPlanax(environment.Environment[EnvState, EnvParams]):
-    def __init__(self):
-        super().__init__()
-        if EnvParams.task == 0:
-            self.num_observation = 16
-        else:
+AgentID = int
+AgentName = str
+TEnvState = TypeVar("TEnvState", bound=EnvState)
+TEnvParams = TypeVar("TEnvParams", bound=EnvParams)
+
+
+class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
+    """Jittable abstract base class for all Aeroplanax Environments."""
+
+    def __init__(
+        self,
+        env_params: Optional[EnvParams] = None,
+    ) -> None:
+        """
+        num_agents (int): maximum number of agents within the environment, used to set array dimensions
+        """
+        if env_params is None:
+            env_params = self.default_params
+
+        self.num_agents: int = env_params.num_allies + env_params.num_enemies
+        self.agents: List[AgentName] = [f"ally_{i}" for i in range(env_params.num_allies)] + [
+            f"enemy_{i}" for i in range(env_params.num_enemies)
+        ]
+        self.agent_ids: Dict[AgentName, AgentID] = {agent: i for i, agent in enumerate(self.agents)}
+        self.teams = jnp.zeros((self.num_agents,), dtype=jnp.uint8)
+        self.teams = self.teams.at[env_params.num_allies:].set(1)
+        self.agent_type = env_params.agent_type
+        self.agent_interaction_steps = env_params.agent_interaction_steps
+
+        self.observation_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
+        }
+        self.action_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_action_space(i) for i, agent in enumerate(self.agents)
+        }
+        self.reward_functions: List[Callable[[TEnvState, TEnvParams, AgentID], float]] = []
+        self.termination_conditions: List[Callable[[TEnvState, TEnvParams, AgentID], Tuple[bool, bool]]] = []
+
+    @property
+    def obs_size(self) -> int:
+        raise NotImplementedError
+
+    def _get_individual_obs_space(self, i) -> spaces.Space:
+        return spaces.Box(low=-jnp.finfo(jnp.float32).max,
+                          high=jnp.finfo(jnp.float32).max,
+                          shape=(self.obs_size,),
+                          dtype=jnp.float32)
+
+    def _get_individual_action_space(self, i) -> spaces.Space:
+        # TODO: different action space for different type of planes
+        if self.agent_type == 0:
+            return spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=jnp.float32)
+        elif self.agent_type == 1:
             raise NotImplementedError
-        self.create_records = False
+        elif self.agent_type == 2:
+            raise NotImplementedError
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _decode_actions(
+        self,
+        key: chex.PRNGKey,
+        state: TEnvState,
+        actions: Dict[AgentName, chex.Array]
+    ) -> BaseControlState:
+        # unpack actions
+        actions = jnp.array([actions[i] for i in self.agents])
+        if self.agent_type == 0:
+            actions = jnp.clip(actions, min=-1, max=1)
+            return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+        elif self.agent_type == 1:
+            raise NotImplementedError
+        elif self.agent_type == 2:
+            raise NotImplementedError
 
     @property
     def default_params(self) -> EnvParams:
         """Default environment parameters for AeroPlanax."""
-        return EnvParams
+        return EnvParams()
 
-    def step_env(
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def reset(
         self,
         key: chex.PRNGKey,
-        state: EnvState,
-        action: Union[int, float, chex.Array],
-        params: EnvParams,
-    ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
-        """Integrate AeroPlanax ODE and return transition."""
-        action = jnp.clip(action, min=-1, max=1)
-        newstate = update(state, action, params.dt)
-        # Update state dict and evaluate termination conditions
-        state = state.replace(
-            north=newstate[0],
-            east=newstate[1],
-            altitude=newstate[2],
-            roll=newstate[3],
-            pitch=newstate[4],
-            yaw=newstate[5],
-            vt=newstate[6],
-            alpha=newstate[7],
-            beta=newstate[8],
-            P=newstate[9],
-            Q=newstate[10],
-            R=newstate[11],
-            T=newstate[12],
-            el=newstate[13],
-            ail=newstate[14],
-            rud=newstate[15],
-            lef=newstate[16],
-            overload=newstate[17],
+        params: Optional[TEnvParams] = None
+    ) -> Tuple[Dict[AgentName, chex.Array], TEnvState]:
+        """Performs resetting of environment."""
+        if params is None:
+            params = self.default_params
+
+        init_state = self._init_state(key, params)
+        state = self._reset_task(key, init_state, params)
+        obs = self._get_obs(state, params)
+        return obs, state
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def step(
+        self,
+        key: chex.PRNGKey,
+        state: TEnvState,
+        actions: Dict[AgentName, chex.Array],
+        params: Optional[TEnvParams] = None,
+    ) -> Tuple[Dict[AgentName, chex.Array], TEnvState, Dict[AgentName, float], Dict[AgentName, bool], Dict[str, Any]]:
+        """Performs step transitions in the environment. Resets the environment if done."""
+        if params is None:
+            params = self.default_params
+
+        actions: BaseControlState = self._decode_actions(key, state, actions)
+
+        def step_sim_fn(plane_states: BasePlaneState, _):
+            if self.agent_type == 0:
+                next_plane_states = jax.vmap(
+                    fighterplane.update, in_axes=(0, 0, None)
+                )(plane_states, actions, 1 / params.sim_freq)
+            elif self.agent_type == 1:
+                raise NotImplementedError
+            elif self.agent_type == 2:
+                raise NotImplementedError
+            # TODO: check collision & missile hit
+            return next_plane_states, True
+
+        new_plane_state, _ = jax.lax.scan(
+            step_sim_fn,
+            init=state.plane_state,
+            xs=None,
+            length=self.agent_interaction_steps,
+        )
+        state_st = state.replace(
+            plane_state=new_plane_state,
             time=state.time + 1
         )
-        done, state = self.is_terminal(state, params)
-        reward = get_reward(reward_functions=reward_functions, state=state)
-        reward = reward.squeeze()
-        return (
-            lax.stop_gradient(self.get_obs(state, params, key)),
-            lax.stop_gradient(state),
-            reward,
-            done,
-            {"success": state.done},
+        state_st = self._step_task(key, state_st, actions, params)
+
+        obs_st = self._get_obs(state_st, params)
+
+        state_st, dones = self.get_termination(state_st, params)
+        dones["__all__"] = state_st.done
+        rewards = self.get_reward(state_st, params)
+        info = {"success": state_st.success}
+
+        # Auto-reset environment based on termination
+        key, key_reset = jax.random.split(key)
+        obs_re, state_re = self.reset(key_reset, params)
+
+        state = jax.tree.map(
+            lambda x, y: jax.lax.select(dones["__all__"], x, y), state_re, state_st
+        )
+        obs = jax.tree.map(
+            lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
         )
 
-    def reset_env(
-        self, key: chex.PRNGKey, params: EnvParams
-    ) -> Tuple[chex.Array, EnvState]:
-        """Reset environment."""
-        state = EnvState(
-            north=jnp.array(0.0), east=jnp.array(0.0), altitude=jnp.array(0.0),
-            roll=jnp.array(0.0), pitch=jnp.array(0.0), yaw=jnp.array(0.0),
-            vt=jnp.array(0.0), alpha=jnp.array(0.0), beta=jnp.array(0.0),
-            P=jnp.array(0.0), Q=jnp.array(0.0), R=jnp.array(0.0), T=jnp.array(0.0),
-            el=jnp.array(0.0), ail=jnp.array(0.0), rud=jnp.array(0.0), lef=jnp.array(0.0),
-            overload=jnp.array(0.0), target_altitude=jnp.array(0.0), 
-            target_heading=jnp.array(0.0), target_vt=jnp.array(0.0), 
-            done=jnp.array(False), bad_done=jnp.array(False),
-            time_out=jnp.array(False), time=jnp.array(0)
+        return lax.stop_gradient(obs), state, rewards, dones, info
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _init_state(
+        self,
+        key: chex.PRNGKey,
+        params: TEnvParams,
+    ) -> TEnvState:
+        """Initialize aeroplane state."""
+        if self.agent_type == 0:
+            aeroplane_state = jax.vmap(
+                fighterplane.FighterPlaneState.create
+            )(jnp.zeros((self.num_agents, 18)))
+            aeroplane_control_state = jax.vmap(
+                fighterplane.FighterPlaneControlState.create
+            )(jnp.zeros((self.num_agents, 4)))
+        elif self.agent_type == 1:
+            raise NotImplementedError
+        elif self.agent_type == 2:
+            raise NotImplementedError
+        env_state = EnvState(
+            plane_state=aeroplane_state,
+            control_state=aeroplane_control_state,
+            done=False,
+            success=False,
+            time=0
         )
-        
-        state = reset(key=key, state=state)
+        return env_state
 
-        return self.get_obs(state=state, params=params, key=key), state
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _reset_task(
+        self,
+        key: chex.PRNGKey,
+        state: TEnvState,
+        params: TEnvParams
+    ) -> TEnvState:
+        """Task-specific reset."""
+        raise NotImplementedError
 
-    def get_obs(self, state: EnvState, params=None, key=None) -> chex.Array:
-        return get_obs(state=state, key=key)
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _step_task(
+        self,
+        key: chex.PRNGKey,
+        state: TEnvState,
+        action: Dict[str, chex.Array],
+        params: TEnvParams,
+    ) -> TEnvState:
+        """Task-specific step transition."""
+        raise NotImplementedError
 
-    def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
-        """Check whether state is terminal."""
-        # Check number of steps in episode termination condition
-        dones, bad_dones, time_outs = get_termination(termination_conditions=termination_conditions, state=state)
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_obs(
+        self,
+        state: TEnvState,
+        params: TEnvParams,
+    ) -> Dict[AgentName, chex.Array]:
+        """Task-specific observation function to state."""
+        raise NotImplementedError
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def get_reward(
+        self,
+        state: TEnvState,
+        params: TEnvParams,
+    ) -> Dict[AgentName, float]:
+        """
+        Aggregate reward functions.
+
+        Args:
+            state (TEnvState): current environment state
+            params (TEnvParams): current environment parameters
+
+        Returns:
+            Dict[AgentName, float]: agents' rewards.
+        """
+        rewards = jnp.zeros(self.num_agents)
+        for reward_function in self.reward_functions:
+            rewards += jax.vmap(
+                reward_function, in_axes=(None, None, 0)
+            )(state, params, jnp.arange(self.num_agents))
+        rewards = {
+            agent: rewards[i] for i, agent in enumerate(self.agents)
+        }
+        return rewards
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def get_termination(
+        self,
+        state: TEnvState,
+        params: TEnvParams,
+    ) -> Tuple[TEnvState, Dict[AgentName, bool]]:
+        """
+        Aggregate termination conditions.
+
+        Args:
+            state (TEnvState): current environment state
+            params (TEnvParams): current environment parameters
+
+        Returns:
+            Tuple[TEnvState, Dict[AgentName, bool]]: updated environment state
+            and agents' termination flags.
+        """
+        dones = jnp.zeros(self.num_agents, dtype=jnp.bool_)
+        successes = jnp.zeros(self.num_agents, dtype=jnp.bool_)
+        for termination_condition in self.termination_conditions:
+            new_done, new_success = jax.vmap(
+                termination_condition, in_axes=(None, None, 0)
+            )(state, params, jnp.arange(self.num_agents))
+            dones = jnp.logical_or(dones, new_done)
+            successes = jnp.logical_or(successes, new_success)
+            # TODO: early stop when all agents are done
+        # modify state
         state = state.replace(
-            done=state.done + dones,
-            bad_done=state.bad_done + bad_dones,
-            time_out=state.time_out + time_outs
+            done=jnp.all(dones),
+            success=jnp.all(successes)
         )
-        done = state.done + state.bad_done
-        return done, state
-    
-    def render(self, state: EnvState, params: EnvParams, output_dir: str):
-        """Small utility for plotting the agent's state."""
+        dones = {
+            agent: dones[i] for i, agent in enumerate(self.agents)
+        }
+        return state, dones
 
-        if state.time == 0:
-            self.create_records = False
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
-            str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S.%f')[:-3]
-            self.filename =  output_dir + str_date_time + '.txt.acmi'
-        if not self.create_records:
-            with open(self.filename, mode='w', encoding='utf-8') as f:
-                f.write("FileType=text/acmi/tacview\n")
-                f.write("FileVersion=2.0\n")
-                f.write("0,ReferenceTime=2023-04-01T00:00:00Z\n")
-            self.create_records = True
-        with open(self.filename, mode='a', encoding='utf-8') as f:
-            timestamp = state.time[0] * params.dt
-            f.write(f"#{timestamp:.2f}\n")
-            npos, epos, alt = state.north[0], state.east[0], state.altitude[0]
-            roll, pitch, yaw = state.roll[0], state.pitch[0], state.yaw[0]
-            npos = npos * 0.3048
-            epos = epos * 0.3048
-            alt = alt * 0.3048
-            roll = roll * 180 / jnp.pi
-            pitch = pitch * 180 / jnp.pi
-            yaw = yaw * 180 / jnp.pi
-            lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
-            log_msg = f"{100},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
-            log_msg += f"Name=F16,"
-            log_msg += f"Color=Red"
-            if log_msg is not None:
-                f.write(log_msg + "\n")
+    def observation_space(self, agent: AgentName, params: TEnvParams) -> spaces.Space:
+        """Observation space for a given agent."""
+        return self.observation_spaces[agent]
+
+    def action_space(self, agent: AgentName, params: TEnvParams) -> spaces.Space:
+        """Action space for a given agent."""
+        return self.action_spaces[agent]
 
     @property
     def name(self) -> str:
         """Environment name."""
-        return "AeroPlanax"
-
-    @property
-    def num_actions(self) -> int:
-        """Number of actions possible in environment."""
-        return 4
-
-    def action_space(self, params: Optional[EnvParams] = None) -> spaces.Box:
-        """Action space of the environment."""
-        return spaces.Box(low=-1, high=1, shape=(4, ), dtype=jnp.float32)
-        
-
-    def observation_space(self, params: EnvParams) -> spaces.Box:
-        """Observation space of the environment."""
-        return spaces.Box(low=-jnp.finfo(jnp.float32).max, 
-                          high=jnp.finfo(jnp.float32).max,
-                          shape=(self.num_observation, ),
-                          dtype=jnp.float32)
-
-    def state_space(self, params: EnvParams) -> spaces.Dict:
-        """State space of the environment."""
-        return spaces.Dict(
-            {
-                "north": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "east": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "altitude": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "roll": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "pitch": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "yaw": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "vt": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "alpha": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "beta": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "P": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "Q": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "R": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "T": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "el": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "ail": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "rud": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "lef": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "overload": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "target_altitude": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "target_heading": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "target_vt": spaces.Box(
-                    -jnp.finfo(jnp.float32).max,
-                    jnp.finfo(jnp.float32).max,
-                    (),
-                    jnp.float32,
-                ),
-                "done": spaces.Discrete(2),
-                "bad_done": spaces.Discrete(2),
-                "time_out": spaces.Discrete(2),
-                "time": spaces.Discrete(params.max_steps_in_episode),
-            }
-        )
-
-def get_reward(reward_functions, state):
-    """
-    Aggregate reward functions
-    """
-    reward = jnp.array(0.0)
-    for reward_function in reward_functions:
-        reward += reward_function(state)
-    return reward
-
-def get_termination(termination_conditions, state):
-    """
-    Aggregate termination conditions
-    """
-    dones = jnp.array(False)
-    bad_dones = jnp.array(False)
-    time_outs = jnp.array(False)
-    for condition in termination_conditions:
-        bad_done, done, time_out = condition(state)
-        dones = dones + done
-        bad_dones = bad_dones + bad_done
-        time_outs = time_outs + time_out
-    return dones, bad_dones, time_outs
+        return type(self).__name__
