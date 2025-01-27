@@ -5,8 +5,9 @@ from flax import struct
 
 class AeroplaneStatus(enum.IntEnum):
     ALIVE = 0
-    CRASHED = 1
-    SHOTDOWN = 2
+    LOCKED = 1
+    CRASHED = 2
+    SHOTDOWN = 3
 
 
 @struct.dataclass
@@ -20,10 +21,15 @@ class BasePlaneState:
     pitch: jax.typing.ArrayLike = 0
     yaw: jax.typing.ArrayLike = 0
     status: jax.typing.ArrayLike = AeroplaneStatus.ALIVE.value
+    blood: jax.typing.ArrayLike = 100.0
 
     @property
     def is_alive(self):
         return self.status == AeroplaneStatus.ALIVE.value
+    
+    @property
+    def is_locked(self):
+        return self.status == AeroplaneStatus.LOCKED.value
     
     @property
     def is_crashed(self):

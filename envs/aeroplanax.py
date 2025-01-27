@@ -9,6 +9,7 @@ from gymnax.environments import environment
 from gymnax.environments import spaces
 from .core.simulators import fighterplane, canardplane, uav
 from .core.base_dataclass import BasePlaneState, BaseControlState
+from .core.utils import update_blood, check_collision, check_locked, check_shutdown
 
 
 @struct.dataclass
@@ -53,6 +54,8 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             env_params = self.default_params
 
         self.num_agents: int = env_params.num_allies + env_params.num_enemies
+        self.num_allies: int = env_params.num_allies
+        self.num_enemies: int = env_params.num_enemies
         self.agents: List[AgentName] = [f"ally_{i}" for i in range(env_params.num_allies)] + [
             f"enemy_{i}" for i in range(env_params.num_enemies)
         ]
@@ -150,7 +153,24 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 raise NotImplementedError
             elif self.agent_type == 2:
                 raise NotImplementedError
-            # TODO: check collision & missile hit
+            if self.num_agents > 1:
+                crashed = jax.vmap(
+                    check_collision, in_axes=(None, 0)
+                )(next_plane_states, jnp.arange(self.num_agents))
+                next_plane_states = next_plane_states.replace(status=jnp.where(crashed, 2, next_plane_states.status))
+            if self.num_enemies > 0:
+                blood = jax.vmap(
+                    update_blood, in_axes=(None, 0, None)
+                )(next_plane_states, jnp.arange(self.num_agents), 1 / params.sim_freq)
+                next_plane_states = next_plane_states.replace(blood=blood)
+                locked = jax.vmap(
+                    check_locked, in_axes=(None, None, 0)
+                )(self.num_allies, next_plane_states, jnp.arange(self.num_agents))
+                shutdown = jax.vmap(
+                    check_shutdown, in_axes=(None, 0)
+                )(next_plane_states, jnp.arange(self.num_agents))
+                next_plane_states = next_plane_states.replace(status=jnp.where(locked, 1, next_plane_states.status))
+                next_plane_states = next_plane_states.replace(status=jnp.where(shutdown, 3, next_plane_states.status))
             return next_plane_states, True
 
         new_plane_state, _ = jax.lax.scan(
@@ -195,7 +215,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         if self.agent_type == 0:
             aeroplane_state = jax.vmap(
                 fighterplane.FighterPlaneState.create
-            )(jnp.zeros((self.num_agents, 18)))
+            )(jnp.zeros((self.num_agents, 17)))
             aeroplane_control_state = jax.vmap(
                 fighterplane.FighterPlaneControlState.create
             )(jnp.zeros((self.num_agents, 4)))

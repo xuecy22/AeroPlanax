@@ -46,7 +46,7 @@ class HeadingTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HeadingTaskParams(EnvParams):
-    num_allies: int = 1
+    num_allies: int = 2
     num_enemies: int = 0
     agent_type: int = 0
     max_altitude: float = 20000
@@ -107,8 +107,8 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         # NOTE: Heading task support only one agent currently.
 
         key_alt, key_vt = jax.random.split(key)
-        altitude = jax.random.uniform(key_alt, shape=(1,), minval=params.min_altitude, maxval=params.max_altitude)
-        vt = jax.random.uniform(key_vt, shape=(1,), minval=params.min_vt, maxval=params.max_vt)
+        altitude = jax.random.uniform(key_alt, shape=(self.num_agents,), minval=params.min_altitude, maxval=params.max_altitude)
+        vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
 
         key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
         delta_heading = jax.random.uniform(key_heading, minval=-params.max_heading_increment, maxval=params.max_heading_increment)
