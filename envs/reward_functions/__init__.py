@@ -1,2 +1,3 @@
 from .heading_reward import heading_reward_fn
 from .event_driven_reward import event_driven_reward_fn
+from .multi_formation_reward import multi_formation_reward_fn
