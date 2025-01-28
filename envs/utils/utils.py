@@ -3,6 +3,7 @@ import yaml
 import math
 import jax.numpy as jnp
 import torch
+import jax
 a = 6378137
 b = 6356752.3142
 f = (a - b) / a
@@ -248,4 +249,81 @@ def distance_fn(R):
     mask2 = (R > 1) & (R <= 3)
     result = 1 * mask1 + (3 - R) / 2 * mask2
     return result
-            
+
+def wedge_formation(num_agents, spacing):
+    max_layers = num_agents  # 最大层数
+    positions = jnp.zeros((num_agents, 3))  # 预分配空间
+
+    def layer_loop(i, carry):
+        layers, positions, count = carry
+        layer_capacity = 2 * layers
+        current_layer = jnp.minimum(num_agents - count, layer_capacity)
+        layer_spacing = spacing * (1.0 / layers)
+
+        def agent_loop(j, carry):
+            positions, count = carry
+            dx = jax.lax.cond(
+                j % 2 == 0,
+                lambda: -((j // 2) + 1) * layer_spacing,
+                lambda: ((j // 2) + 1) * layer_spacing
+            )
+            dy = layers * spacing
+            new_position = jnp.array([dx, dy, 0.0])
+            return positions.at[count].set(new_position), count + 1
+
+        positions, count = jax.lax.fori_loop(0, current_layer, agent_loop, (positions, count))
+        return layers + 1, positions, count
+
+    # 使用 fori_loop 替代 while_loop
+    _, positions, _ = jax.lax.fori_loop(0, max_layers, layer_loop, (1, positions, 0))
+    return positions
+
+def line_formation(num_agents, spacing):
+    positions = jnp.zeros((num_agents, 3))  # 预分配空间
+    start_x = -(num_agents - 1) * spacing / 2
+    positions = positions.at[:, 0].set(start_x + spacing * jnp.arange(num_agents))
+    return positions
+
+def diamond_formation(num_agents, spacing):
+    max_layers = num_agents  # 最大层数
+    positions = jnp.zeros((num_agents, 3))  # 预分配空间
+    positions = positions.at[0].set(jnp.array([0.0, 0.0, 0.0]))  # 添加长机位置
+
+    def layer_loop(i, carry):
+        layer, positions, count = carry
+        directions = jnp.array([[-1, 1], [1, 1], [0, 2]])
+
+        def direction_loop(j, carry):
+            positions, count = carry
+            dx, dy = directions[j]
+            new_position = jnp.array([dx * layer * spacing, dy * layer * spacing, 0.0])
+            return positions.at[count].set(new_position), count + 1
+
+        positions, count = jax.lax.fori_loop(0, len(directions), direction_loop, (positions, count))
+        return layer + 1, positions, count
+
+    # 使用 fori_loop 替代 while_loop
+    _, positions, _ = jax.lax.fori_loop(0, max_layers, layer_loop, (1, positions, 1))
+    return positions
+
+def enforce_safe_distance(positions, center, safe_distance):
+    def agent_loop(i, carry):
+        formation_positions, positions = carry
+        pos = positions[i] + center
+
+        def distance_loop(j, pos):
+            existing = formation_positions[j]
+            dist = jnp.linalg.norm(pos - existing)
+            return jnp.where(
+                dist < safe_distance,
+                existing + (pos - existing) * safe_distance / dist,
+                pos
+            )
+
+        pos = jax.lax.fori_loop(0, i, distance_loop, pos)
+        formation_positions = formation_positions.at[i].set(pos)
+        return formation_positions, positions
+
+    formation_positions = jnp.zeros_like(positions)
+    formation_positions, _ = jax.lax.fori_loop(0, len(positions), agent_loop, (formation_positions, positions))
+    return formation_positions

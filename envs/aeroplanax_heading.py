@@ -77,8 +77,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
             unreach_heading_fn,
         ]
 
-    @property
-    def obs_size(self) -> int:
+    def _get_obs_size(self) -> int:
         return 16
 
     @property

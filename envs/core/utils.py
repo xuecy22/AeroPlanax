@@ -43,9 +43,9 @@ def check_locked(num_allies, state: BasePlaneState, agent_id, R=100000, angle=jn
     locked = jnp.any(mask)
     return locked
 
-def check_shutdown(state: BasePlaneState, agent_id) -> BasePlaneState:
-    shutdown = state.blood[agent_id] < 0
-    return shutdown
+def check_shotdown(state: BasePlaneState, agent_id) -> BasePlaneState:
+    shotdown = state.blood[agent_id] < 0
+    return shotdown
 
 def update_blood(state: BasePlaneState, agent_id, dt) -> BasePlaneState:
     return state.blood[agent_id] - 20 * dt

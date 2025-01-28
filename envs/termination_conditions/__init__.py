@@ -5,3 +5,4 @@ from .low_speed import low_speed_fn
 from .overload import overload_fn
 from .timeout import timeout_fn
 from .unreach_heading import unreach_heading_fn
+from .safe_return import safe_return_fn

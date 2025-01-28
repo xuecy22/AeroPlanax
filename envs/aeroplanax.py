@@ -9,7 +9,7 @@ from gymnax.environments import environment
 from gymnax.environments import spaces
 from .core.simulators import fighterplane, canardplane, uav
 from .core.base_dataclass import BasePlaneState, BaseControlState
-from .core.utils import update_blood, check_collision, check_locked, check_shutdown
+from .core.utils import update_blood, check_collision, check_locked, check_shotdown
 
 
 @struct.dataclass
@@ -27,6 +27,7 @@ class EnvParams(environment.EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
     agent_type: int = 0  # 0: fighterplane, 1: canardplane, 2: uav  TODO: heterogeneous agents
+    action_type: int = 0 # 0: continuous, 1: discrete
     max_steps: int = 100
     sim_freq: int = 50
     agent_interaction_steps: int = 1
@@ -63,6 +64,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self.teams = jnp.zeros((self.num_agents,), dtype=jnp.uint8)
         self.teams = self.teams.at[env_params.num_allies:].set(1)
         self.agent_type = env_params.agent_type
+        self.action_type = env_params.action_type
         self.agent_interaction_steps = env_params.agent_interaction_steps
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
@@ -74,20 +76,27 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self.reward_functions: List[Callable[[TEnvState, TEnvParams, AgentID], float]] = []
         self.termination_conditions: List[Callable[[TEnvState, TEnvParams, AgentID], Tuple[bool, bool]]] = []
 
-    @property
-    def obs_size(self) -> int:
+    def _get_obs_size(self) -> int:
         raise NotImplementedError
 
     def _get_individual_obs_space(self, i) -> spaces.Space:
         return spaces.Box(low=-jnp.finfo(jnp.float32).max,
                           high=jnp.finfo(jnp.float32).max,
-                          shape=(self.obs_size,),
+                          shape=(self._get_obs_size,),
                           dtype=jnp.float32)
 
     def _get_individual_action_space(self, i) -> spaces.Space:
         # TODO: different action space for different type of planes
         if self.agent_type == 0:
-            return spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=jnp.float32)
+            if self.action_type == 0:
+                return spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=jnp.float32)
+            elif self.action_type == 1:
+                return spaces.Dict({"throttle": spaces.Discrete(31),
+                                    "elevator": spaces.Discrete(41),
+                                    "aileron": spaces.Discrete(41),
+                                    "rudder": spaces.Discrete(41),})
+            else:
+                raise NotImplementedError
         elif self.agent_type == 1:
             raise NotImplementedError
         elif self.agent_type == 2:
@@ -103,12 +112,34 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         # unpack actions
         actions = jnp.array([actions[i] for i in self.agents])
         if self.agent_type == 0:
-            actions = jnp.clip(actions, min=-1, max=1)
-            return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+            if self.action_type == 0:
+                actions = jnp.clip(actions, min=-1, max=1)
+                return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+            elif self.action_type == 1:
+                actions = jax.vmap(self._decode_discrete_actions)(actions)
+                return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+            else:
+                raise NotImplementedError
         elif self.agent_type == 1:
             raise NotImplementedError
         elif self.agent_type == 2:
             raise NotImplementedError
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _decode_discrete_actions(
+        self,
+        key: chex.PRNGKey,
+        state: TEnvState,
+        action: jnp.ndarray
+    ) -> jnp.ndarray:
+        """Convert discrete action index into continuous value.
+        """
+        norm_act = jnp.zeros_like(action)
+        norm_act = norm_act.at[0].set(action[0] / 30.)
+        norm_act = norm_act.at[1].set(action[1] * 2. / 40. - 1.)
+        norm_act = norm_act.at[2].set(action[2] * 2. / 40. - 1.)
+        norm_act = norm_act.at[3].set(action[3] * 2. / 40. - 1.)
+        return norm_act
 
     @property
     def default_params(self) -> EnvParams:
@@ -166,11 +197,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 locked = jax.vmap(
                     check_locked, in_axes=(None, None, 0)
                 )(self.num_allies, next_plane_states, jnp.arange(self.num_agents))
-                shutdown = jax.vmap(
-                    check_shutdown, in_axes=(None, 0)
+                shotdown = jax.vmap(
+                    check_shotdown, in_axes=(None, 0)
                 )(next_plane_states, jnp.arange(self.num_agents))
                 next_plane_states = next_plane_states.replace(status=jnp.where(locked, 1, next_plane_states.status))
-                next_plane_states = next_plane_states.replace(status=jnp.where(shutdown, 3, next_plane_states.status))
+                next_plane_states = next_plane_states.replace(status=jnp.where(shotdown, 3, next_plane_states.status))
             return next_plane_states, True
 
         new_plane_state, _ = jax.lax.scan(
