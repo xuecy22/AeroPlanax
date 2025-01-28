@@ -38,8 +38,8 @@ class CombatTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class CombatTaskParams(EnvParams):
-    num_allies: int = 1
-    num_enemies: int = 1
+    num_allies: int = 2
+    num_enemies: int = 3
     agent_type: int = 0
     action_type: int = 0
     observation_type: int = 0 # 0: unit_list, 1: conic
@@ -235,13 +235,13 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         # 根据队形类型选择生成函数
         if self.formation_type == 0:
             ally_positions = wedge_formation(self.num_allies, params.team_spacing)
-            enemy_positions = wedge_formation(self.num_allies, params.team_spacing)
+            enemy_positions = wedge_formation(self.num_enemies, params.team_spacing)
         elif self.formation_type == 1:
             ally_positions = line_formation(self.num_allies, params.team_spacing)
-            enemy_positions = line_formation(self.num_allies, params.team_spacing)
+            enemy_positions = line_formation(self.num_enemies, params.team_spacing)
         elif self.formation_type == 1:
             ally_positions = diamond_formation(self.num_allies, params.team_spacing)
-            enemy_positions = diamond_formation(self.num_allies, params.team_spacing)
+            enemy_positions = diamond_formation(self.num_enemies, params.team_spacing)
         else:
             raise ValueError("Provided formation type is not valid")
         
