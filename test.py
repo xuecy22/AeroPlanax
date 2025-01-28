@@ -2,12 +2,13 @@ import os
 os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
 
 import jax
-from envs.aeroplanax_heading import AeroPlanaxHeadingEnv
+# from envs.aeroplanax_heading import AeroPlanaxHeadingEnv
+from envs.aeroplanax_formation import AeroPlanaxFormationEnv
 
 key = jax.random.PRNGKey(0)
 
 # Instantiate the environment & its settings.
-env = AeroPlanaxHeadingEnv()
+env = AeroPlanaxFormationEnv()
 env_params = env.default_params
 
 # Reset the environment.

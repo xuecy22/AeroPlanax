@@ -1,6 +1,7 @@
 # 导入必要的模块和类型
 from typing import Dict, Optional, Tuple  # 用于类型注解
 from jax import Array  # JAX 的数组类型
+from jax import lax  # JAX 的低级 API
 from jax.typing import ArrayLike  # JAX 中类似数组的类型
 import chex  # JAX 的类型检查和测试工具库
 import functools  # 提供高阶函数工具，如 partial
@@ -57,7 +58,7 @@ class FormationTaskState(EnvState):
 # 定义 FormationTaskParams 类，继承自 EnvParams
 @struct.dataclass(frozen=True)
 class FormationTaskParams(EnvParams):
-    num_allies: int = 3   # 在同一个编队中的飞机数量
+    num_allies: int = struct.field(default=1, pytree_node=False)  # 静态字段   # 在同一个编队中的飞机数量
     num_enemies: int = 0  # 敌人数量
     agent_type: int = 0  # 代理类型
     max_altitude: float = 20000  # 最大高度
@@ -77,7 +78,7 @@ class FormationTaskParams(EnvParams):
 
     # 编队相关
     intra_team_spacing: float = 1000  # 队内间距
-    formation_type: str = "wedge"  # 编队类型（wedge, line, diamond）
+    formation_type: int = struct.field(default=0, pytree_node=False)  # 静态字段  # 编队类型（wedge : 0, line : 1, diamond : 2）
     safe_distance: float = 500        # 安全距离参数
 
 # 定义 AeroPlanaxFormationEnv 类，继承自 AeroPlanaxEnv
@@ -85,9 +86,12 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
     def __init__(self, env_params: Optional[FormationTaskParams] = None):
         super().__init__(env_params)  # 调用父类构造函数
 
+        # 注意：这里去掉对 formation_type="wedge" 的 partial 绑定，
+        # 只把 reward_scale 等数值参数绑定即可，编队类型统一在 multi_formation_reward_fn
+        # 内部根据 params.formation_type 来获取。
         # 定义奖励函数
         self.reward_functions = [
-            functools.partial(multi_formation_reward_fn, formation_type = "wedge", reward_scale=1.0),  # 多智能体编队奖励函数
+            functools.partial(multi_formation_reward_fn, reward_scale=1.0),  # 多智能体编队奖励函数
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),  # 事件驱动奖励函数
         ]
 
@@ -155,76 +159,123 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             params.safe_distance
         )
 
+    @functools.partial(jax.jit, static_argnames=("self", "num_agents", "formation_type"))
     def generate_formation(
-        self,
-        center: ArrayLike,
-        formation_type: str,
-        num_agents: int,
-        spacing: float,
-        safe_distance: float
-    ) -> Dict[AgentID, ArrayLike]:
+            self,
+            center: ArrayLike,
+            formation_type: int,  # 使用整数枚举值
+            num_agents: int,
+            spacing: float,
+            safe_distance: float
+        ) -> jnp.ndarray:  # 返回数组而不是字典
         """
         动态生成战术队形，保证智能体不重叠
         Args:
             center: 编队中心坐标 [x,y,z]
+            formation_type: 编队类型（整数枚举值）
             num_agents: 总智能体数
             spacing: 基础间距（会根据队形自动调整）
+            safe_distance: 安全距离
         """
-        positions = []
-        if formation_type == "wedge":
-            # 楔形队形分层生成
-            layers = 1
-            while len(positions) < num_agents:
-                # 每层可容纳2*layers个智能体
+        FORMATION_WEDGE = 0
+        FORMATION_LINE = 1
+        FORMATION_DIAMOND = 2
+
+        def wedge_formation(num_agents, spacing):
+            max_layers = num_agents  # 最大层数
+            positions = jnp.zeros((num_agents, 3))  # 预分配空间
+
+            def layer_loop(i, carry):
+                layers, positions, count = carry
                 layer_capacity = 2 * layers
-                current_layer = min(num_agents - len(positions), layer_capacity)
-                # 动态调整层间距
+                current_layer = jnp.minimum(num_agents - count, layer_capacity)
                 layer_spacing = spacing * (1.0 / layers)
-                for i in range(current_layer):
-                    if i % 2 == 0:
-                        dx = -((i//2)+1) * layer_spacing
-                    else:
-                        dx = ((i//2)+1) * layer_spacing
+
+                def agent_loop(j, carry):
+                    positions, count = carry
+                    dx = lax.cond(
+                        j % 2 == 0,
+                        lambda: -((j // 2) + 1) * layer_spacing,
+                        lambda: ((j // 2) + 1) * layer_spacing
+                    )
                     dy = layers * spacing
-                    positions.append([dx, dy, 0])
-                layers += 1
-            positions = positions[:num_agents]
-            # 添加长机位置
-            positions.insert(0, [0, 0, 0])
-            positions = positions[:num_agents]
-        elif formation_type == "line":
-            # 横队均匀分布
-            start_x = -(num_agents-1)*spacing/2
-            positions = [[start_x + i*spacing, 0, 0] for i in range(num_agents)]
-        elif formation_type == "diamond":
-            # 菱形队形分层生成
-            positions.append([0, 0, 0])
-            layer = 1
-            while len(positions) < num_agents:
-                for dx, dy in [(-1,1), (1,1), (0,2)]:  # 三个方向扩展
-                    if len(positions) >= num_agents:
-                        break
-                    positions.append([dx*layer*spacing, dy*layer*spacing, 0])
-                layer += 1
-        else:
-            raise ValueError(f"Unsupported formation type: {formation_type}")
+                    new_position = jnp.array([dx, dy, 0.0])
+                    return positions.at[count].set(new_position), count + 1
+
+                positions, count = lax.fori_loop(0, current_layer, agent_loop, (positions, count))
+                return layers + 1, positions, count
+
+            # 使用 fori_loop 替代 while_loop
+            _, positions, _ = lax.fori_loop(0, max_layers, layer_loop, (1, positions, 0))
+            return positions
+
+        def line_formation(num_agents, spacing):
+            positions = jnp.zeros((num_agents, 3))  # 预分配空间
+            start_x = -(num_agents - 1) * spacing / 2
+            return jnp.array([[start_x + i * spacing, 0.0, 0.0] for i in range(num_agents)])
+
+        def diamond_formation(num_agents, spacing):
+            max_layers = num_agents  # 最大层数
+            positions = jnp.zeros((num_agents, 3))  # 预分配空间
+            positions = positions.at[0].set(jnp.array([0.0, 0.0, 0.0]))  # 添加长机位置
+
+            def layer_loop(i, carry):
+                layer, positions, count = carry
+                directions = jnp.array([[-1, 1], [1, 1], [0, 2]])
+
+                def direction_loop(j, carry):
+                    positions, count = carry
+                    dx, dy = directions[j]
+                    new_position = jnp.array([dx * layer * spacing, dy * layer * spacing, 0.0])
+                    return positions.at[count].set(new_position), count + 1
+
+                positions, count = lax.fori_loop(0, len(directions), direction_loop, (positions, count))
+                return layer + 1, positions, count
+
+            # 使用 fori_loop 替代 while_loop
+            _, positions, _ = lax.fori_loop(0, max_layers, layer_loop, (1, positions, 1))
+            return positions
+
+        # 根据队形类型选择生成函数
+        positions = lax.cond(
+            formation_type == FORMATION_WEDGE,
+            lambda: wedge_formation(num_agents, spacing),
+            lambda: lax.cond(
+                formation_type == FORMATION_LINE,
+                lambda: line_formation(num_agents, spacing),
+                lambda: lax.cond(
+                    formation_type == FORMATION_DIAMOND,
+                    lambda: diamond_formation(num_agents, spacing),
+                    lambda: line_formation(num_agents, spacing)  # 当遇到未知类型时返回直线队形
+                )
+            )
+        )
 
         # 转换为全局坐标并确保安全距离
-        formation_positions = {}
-        for idx, (dx, dy, dz) in enumerate(positions):
-            pos = jnp.array([
-                center[0] + dx,
-                center[1] + dy,
-                center[2] + dz
-            ])
-            # 检查与已有位置的距离
-            for existing in formation_positions.values():
-                dist = jnp.linalg.norm(pos - existing)
-                pos = jnp.where(dist < safe_distance, 
-                              existing + (pos - existing) * safe_distance / dist,
-                              pos)
-            formation_positions[idx] = pos
-        return formation_positions
+        def enforce_safe_distance(positions, center, safe_distance):
+            def agent_loop(i, carry):
+                formation_positions, positions = carry
+                pos = positions[i] + center
+
+                def distance_loop(j, pos):
+                    existing = formation_positions[j]
+                    dist = jnp.linalg.norm(pos - existing)
+                    return jnp.where(
+                        dist < safe_distance,
+                        existing + (pos - existing) * safe_distance / dist,
+                        pos
+                    )
+
+                pos = lax.fori_loop(0, i, distance_loop, pos)
+                formation_positions = formation_positions.at[i].set(pos)
+                return formation_positions, positions
+
+            formation_positions = jnp.zeros_like(positions)
+            formation_positions, _ = lax.fori_loop(0, len(positions), agent_loop, (formation_positions, positions))
+            return formation_positions
+
+        formation_positions = enforce_safe_distance(positions, center, safe_distance)
+        return formation_positions  # 返回数组
 
     # 任务特定的重置逻辑
     @functools.partial(jax.jit, static_argnums=(0,))

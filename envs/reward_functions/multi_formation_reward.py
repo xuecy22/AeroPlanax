@@ -5,10 +5,9 @@ from ..utils.utils import wrap_PI
 
 
 def multi_formation_reward_fn(
-    state: TEnvState,
+    state: TEnvState,  
     params: TEnvParams,
     agent_id: AgentID,
-    formation_type: str = "wedge",
     spacing: float = 800,
     reward_scale: float = 1.0,
     collision_penalty: float = -1000,
@@ -25,7 +24,6 @@ def multi_formation_reward_fn(
 
 
         agent_id: 当前智能体的 ID。
-        formation_type: 编队类型（wedge, line, diamond）。
         spacing: 编队间距。
         reward_scale: 奖励缩放因子。
         collision_penalty: 碰撞惩罚。
@@ -35,6 +33,10 @@ def multi_formation_reward_fn(
     Returns:
         当前智能体的奖励值。
     """
+
+    # # 在这里动态获取编队类型
+    # formation_type = params.formation_type
+
     # 1. 目标跟踪奖励（基于 heading_reward_fn）
     altitude = state.plane_state.altitude
     yaw = state.plane_state.yaw
@@ -49,18 +51,17 @@ def multi_formation_reward_fn(
 
     # 2. 编队保持奖励
     target_pos = state.formation_positions[agent_id]
-    current_pos = jnp.array([state.plane_state.x, state.plane_state.y, state.plane_state.altitude])
+    current_pos = jnp.array([state.plane_state.north, state.plane_state.east, state.plane_state.altitude])
     pos_diff = (current_pos - target_pos) * 0.001  # 米转千米
     reward_formation = -jnp.sum(pos_diff**2) 
 
     # 3. 碰撞避免
     def calc_distance(other_id):
-        other_pos = jnp.array([
-            state.plane_states[other_id].x,
-            state.plane_states[other_id].y,
-            state.plane_states[other_id].altitude
-        ])
-        return jnp.linalg.norm(current_pos - other_pos)
+        return jnp.where(
+            other_id == agent_id,  # 条件
+            jnp.inf,  # 如果条件为 True，返回无穷大
+            jnp.linalg.norm(current_pos - state.formation_positions[other_id])  # 否则计算距离
+        )
     
     distances = vmap(calc_distance)(jnp.arange(params.num_allies))
     min_distance = jnp.min(jnp.where(distances == 0, jnp.inf, distances))  # 排除自身 提取所有非零距离中的最小值并与安全距离进行比较
@@ -71,11 +72,11 @@ def multi_formation_reward_fn(
     reward_event = state.done * (state.success * success_reward + (1 - state.success) * fail_reward)
 
     # 5. 综合奖励
-    total_reward = (
-        reward_target * 0.4 +  # 目标跟踪奖励
-        reward_formation * 0.4 +  # 编队保持奖励
-        collision_penalty_value * 0.1 +  # 碰撞避免惩罚
-        reward_event * 0.1  # 任务完成奖励
-    ) * reward_scale
+    total_reward = reward_scale * (
+        reward_target * 0.00003 +  # 目标跟踪奖励
+        reward_formation * 0.00003 +  # 编队保持奖励
+        collision_penalty_value * 0.000001 )   # 碰撞避免惩罚
+    + reward_event  # 任务完成奖励
+    
 
     return total_reward
