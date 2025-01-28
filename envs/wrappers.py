@@ -7,8 +7,6 @@ import numpy as np
 from flax import struct
 from functools import partial
 
-# from gymnax.environments import environment, spaces
-from gymnax.environments.spaces import Box as BoxGymnax, Discrete as DiscreteGymnax
 from typing import Dict, Optional, List, Tuple, Union
 from .aeroplanax import AeroPlanaxEnv, EnvState
 

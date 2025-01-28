@@ -22,5 +22,6 @@ for i in range(100):
         agent: env.action_space(agent, env_params).sample(key_act[i])
         for i, agent in enumerate(env.agents)
     }
+    print(actions)
     obs, state, reward, done, _ = env.step(key_step, state, actions, env_params)
-    print(f'Time: {state.time}, Done: {done}, Reward: {reward}')
+    print(f'Time: {state.time}, Done: {done["__all__"]}, Reward: {reward}')

@@ -46,7 +46,7 @@ class HeadingTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HeadingTaskParams(EnvParams):
-    num_allies: int = 2
+    num_allies: int = 1
     num_enemies: int = 0
     agent_type: int = 0
     max_altitude: float = 20000

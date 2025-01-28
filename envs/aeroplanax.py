@@ -6,7 +6,7 @@ import jax
 from jax import lax
 import jax.numpy as jnp
 from gymnax.environments import environment
-from gymnax.environments import spaces
+from .utils import spaces
 from .core.simulators import fighterplane, canardplane, uav
 from .core.base_dataclass import BasePlaneState, BaseControlState
 from .core.utils import update_blood, check_collision, check_locked, check_shutdown
@@ -27,6 +27,7 @@ class EnvParams(environment.EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
     agent_type: int = 0  # 0: fighterplane, 1: canardplane, 2: uav  TODO: heterogeneous agents
+    action_space_type: int = 0  # 0: continuous, 1: discrete
     max_steps: int = 100
     sim_freq: int = 50
     agent_interaction_steps: int = 1
@@ -63,6 +64,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self.teams = jnp.zeros((self.num_agents,), dtype=jnp.uint8)
         self.teams = self.teams.at[env_params.num_allies:].set(1)
         self.agent_type = env_params.agent_type
+        self.action_space_type = env_params.action_space_type
         self.agent_interaction_steps = env_params.agent_interaction_steps
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
@@ -87,12 +89,15 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     def _get_individual_action_space(self, i) -> spaces.Space:
         # TODO: different action space for different type of planes
         if self.agent_type == 0:
-            return spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=jnp.float32)
+            if self.action_space_type == 0:
+                return spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=jnp.float32)
+            elif self.action_space_type == 1:
+                return spaces.MultiDiscrete([41, 41, 41, 41])
         elif self.agent_type == 1:
             raise NotImplementedError
         elif self.agent_type == 2:
             raise NotImplementedError
-    
+
     @functools.partial(jax.jit, static_argnums=(0,))
     def _decode_actions(
         self,
@@ -103,8 +108,19 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         # unpack actions
         actions = jnp.array([actions[i] for i in self.agents])
         if self.agent_type == 0:
-            actions = jnp.clip(actions, min=-1, max=1)
-            return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+            if self.action_space_type == 0:
+                actions = jnp.clip(actions, min=-1, max=1)
+                return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+            elif self.action_space_type == 1:
+                def normalize_action(action: chex.Array):
+                    action = action.astype(jnp.float32)
+                    action = action.at[0].set(action[0] / 20 - 1)
+                    action = action.at[1].set(action[1] / 20 - 1)
+                    action = action.at[2].set(action[2] / 20 - 1)
+                    action = action.at[3].set(action[3] / 20 - 1)
+                    return action
+                actions = jax.vmap(normalize_action)(actions)
+                return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
         elif self.agent_type == 1:
             raise NotImplementedError
         elif self.agent_type == 2:
