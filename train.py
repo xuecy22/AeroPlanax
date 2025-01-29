@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -462,10 +462,10 @@ config = {
     "GROUP": "multi_heading",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 1000,
-    "NUM_ACTORS": 2,
+    "NUM_ENVS": 200,
+    "NUM_ACTORS": 10,
     "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 1e9,
+    "TOTAL_TIMESTEPS": 2e8,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -495,7 +495,7 @@ wandb.init(
     name=f'seed_{seed}',
     group=config['GROUP'],
     notes='single target',
-    dir=config['LOGDIR'],
+    # dir=config['LOGDIR'],
     reinit=True,
 )
 

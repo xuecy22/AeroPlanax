@@ -286,7 +286,7 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
                                  xdot[7], xdot[8], xdot[6], xu[9], xu[10], xu[11])
     overload = jnp.sqrt(nx_cg ** 2 + ny_cg ** 2 + nz_cg ** 2)
     new_x = x + xdot[:12] * dt
-    state = state.replace(
+    new_state = state.replace(
         north=new_x[0], east=new_x[1], altitude=new_x[2],
         roll=new_x[3], pitch=new_x[4], yaw=new_x[5],
         vt=new_x[6], alpha=new_x[7], beta=new_x[8],
@@ -294,4 +294,6 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
         T=T, el=el, ail=ail, rud=rud,
         overload=overload
     )
+    mask = state.is_crashed | state.is_shotdown
+    state = jax.lax.cond(mask, lambda: state, lambda: new_state)
     return state

@@ -9,7 +9,7 @@ from gymnax.environments import environment
 from gymnax.environments import spaces
 from .core.simulators import fighterplane, canardplane, uav
 from .core.base_dataclass import BasePlaneState, BaseControlState
-from .core.utils import update_blood, check_collision, check_locked, check_shotdown
+from .core.utils import update_blood, check_crashed, check_locked, check_shotdown
 
 
 @struct.dataclass
@@ -180,7 +180,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 raise NotImplementedError
             if self.num_agents > 1:
                 crashed = jax.vmap(
-                    check_collision, in_axes=(None, 0)
+                    check_crashed, in_axes=(None, 0)
                 )(next_plane_states, jnp.arange(self.num_agents))
                 next_plane_states = next_plane_states.replace(status=jnp.where(crashed, 2, next_plane_states.status))
             if self.num_enemies > 0:

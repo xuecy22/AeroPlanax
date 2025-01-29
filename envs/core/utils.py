@@ -10,7 +10,44 @@ def check_collision(state: BasePlaneState, agent_id, R=50) -> BasePlaneState:
     position = jnp.vstack((state.north, state.east, state.altitude))
     distance = jnp.linalg.norm(cur_pos - position, axis=0)
     distance = distance.at[agent_id].set(jnp.finfo(jnp.float32).max)
-    crashed = jnp.any(distance < R)
+    done = jnp.any(distance < R)
+    return done
+
+def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-30, max_beta=30) -> BasePlaneState:
+    alpha = state.alpha[agent_id] * 180 / jnp.pi
+    beta = state.beta[agent_id] * 180 / jnp.pi
+    mask1 = (alpha < min_alpha) | (alpha > max_alpha)
+    mask2 = (beta < min_beta) | (beta > max_beta)
+    done = mask1 | mask2
+    return done
+
+def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3) -> BasePlaneState:
+    velocity = state.vt[agent_id] * 0.3048 / 340
+    done = velocity > max_velocity
+    return done
+
+def check_low_speed(state: BasePlaneState, agent_id, min_velocity=0.01) -> BasePlaneState:
+    velocity = state.vt[agent_id] * 0.3048 / 340
+    done = velocity < min_velocity
+    return done
+
+def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=2500) -> BasePlaneState:
+    altitude = state.altitude[agent_id]
+    done = altitude < altitude_limit
+    return done
+
+def check_overload(state: BasePlaneState, agent_id, max_overload=10) -> BasePlaneState:
+    done = state.overload[agent_id] > max_overload
+    return done
+
+def check_crashed(state: BasePlaneState, agent_id) -> BasePlaneState:
+    mask1 = check_collision(state, agent_id)
+    mask2 = check_extreme_state(state, agent_id)
+    mask3 = check_high_speed(state, agent_id)
+    mask4 = check_low_speed(state, agent_id)
+    mask5 = check_low_altitude(state, agent_id)
+    mask6 = check_overload(state, agent_id)
+    crashed = mask1 | mask2 | mask3 | mask4 | mask5 | mask6
     return crashed
 
 def check_locked(num_allies, state: BasePlaneState, agent_id, R=100000, angle=jnp.pi/3) -> BasePlaneState:

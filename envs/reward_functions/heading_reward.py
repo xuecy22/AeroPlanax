@@ -23,4 +23,5 @@ def heading_reward_fn(
     reward_heading = -delta_heading ** 2
     reward_vt = -delta_vt ** 2
     reward_target = reward_altitude + reward_heading + reward_vt
-    return reward_target * reward_scale
+    mask = state.plane_state.is_crashed[agent_id] | state.plane_state.is_shotdown[agent_id]
+    return reward_target * reward_scale * mask
