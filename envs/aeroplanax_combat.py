@@ -8,6 +8,7 @@ import functools
 import jax
 import jax.numpy as jnp
 from flax import struct
+from gymnax.environments import spaces
 from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
 from .reward_functions import (
     event_driven_reward_fn,
@@ -66,6 +67,13 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         self.unit_features = env_params.unit_features
         self.own_features = env_params.own_features
         self.formation_type = env_params.formation_type
+
+        self.observation_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
+        }
+        self.action_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_action_space(i) for i, agent in enumerate(self.agents)
+        }
 
         self.reward_functions = [
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200)

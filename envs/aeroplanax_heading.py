@@ -8,6 +8,7 @@ import functools
 import jax
 import jax.numpy as jnp
 from flax import struct
+from gymnax.environments import spaces
 from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
 from .reward_functions import (
     heading_reward_fn,
@@ -62,6 +63,13 @@ class HeadingTaskParams(EnvParams):
 class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     def __init__(self, env_params: Optional[HeadingTaskParams] = None):
         super().__init__(env_params)
+
+        self.observation_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
+        }
+        self.action_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_action_space(i) for i, agent in enumerate(self.agents)
+        }
 
         self.reward_functions = [
             functools.partial(heading_reward_fn, reward_scale=1.0),
@@ -188,9 +196,9 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         alpha_cos = jnp.cos(alpha)
         beta_sin = jnp.sin(beta)
         beta_cos = jnp.cos(beta)
-        obs = jnp.hstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
+        obs = jnp.vstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
                             norm_altitude, norm_vt,
                             roll_sin, roll_cos, pitch_sin, pitch_cos,
                             alpha_sin, alpha_cos, beta_sin, beta_cos,
                             P, Q, R))
-        return {agent: obs for agent in self.agents}
+        return {agent: obs[:, i] for i, agent in enumerate(self.agents)}

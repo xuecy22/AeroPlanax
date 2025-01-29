@@ -67,12 +67,6 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self.action_type = env_params.action_type
         self.agent_interaction_steps = env_params.agent_interaction_steps
 
-        self.observation_spaces: Dict[AgentName, spaces.Space] = {
-            agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
-        }
-        self.action_spaces: Dict[AgentName, spaces.Space] = {
-            agent: self._get_individual_action_space(i) for i, agent in enumerate(self.agents)
-        }
         self.reward_functions: List[Callable[[TEnvState, TEnvParams, AgentID], float]] = []
         self.termination_conditions: List[Callable[[TEnvState, TEnvParams, AgentID], Tuple[bool, bool]]] = []
 
@@ -82,7 +76,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     def _get_individual_obs_space(self, i) -> spaces.Space:
         return spaces.Box(low=-jnp.finfo(jnp.float32).max,
                           high=jnp.finfo(jnp.float32).max,
-                          shape=(self._get_obs_size,),
+                          shape=(self._get_obs_size(),),
                           dtype=jnp.float32)
 
     def _get_individual_action_space(self, i) -> spaces.Space:

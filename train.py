@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -103,7 +103,7 @@ class Transition(NamedTuple):
 
 def batchify(x: dict, agent_list, num_envs, num_actors):
     x = jnp.stack([x[a] for a in agent_list])
-    #print('batchify', x.shape)
+    # print('batchify', x.shape)
     return x.reshape((num_actors * num_envs, -1))
 
 
@@ -127,11 +127,11 @@ def make_train(config):
         rng = jax.random.PRNGKey(42)
         init_x = (
             jnp.zeros(
-                (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
+                (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
             ),
-            jnp.zeros((1, config["NUM_ENVS"])),
+            jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
         )
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
         network_params = network.init(rng, init_hstate, init_x)
         if config["ANNEAL_LR"]:
             tx = optax.chain(
@@ -168,11 +168,11 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         init_x = (
             jnp.zeros(
-                (1, config["NUM_ENVS"], *env.observation_space(env.agents[0], env_params).shape)
+                (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
             ),
-            jnp.zeros((1, config["NUM_ENVS"])),
+            jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
         )
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
         network_params = network.init(_rng, init_hstate, init_x)
         if config["ANNEAL_LR"]:
             tx = optax.chain(
@@ -200,7 +200,7 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
         # INIT Tensorboard
         if config.get("DEBUG"):
@@ -445,7 +445,7 @@ def make_train(config):
             train_state,
             env_state,
             batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]),
-            jnp.zeros((config["NUM_ENVS"]), dtype=bool),
+            jnp.zeros((config["NUM_ENVS"] * config["NUM_ACTORS"]), dtype=bool),
             init_hstate,
             _rng,
         )
@@ -459,9 +459,11 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
+    "GROUP": "multi_heading",
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 1000,
+    "NUM_ACTORS": 2,
     "NUM_STEPS": 3000,
     "TOTAL_TIMESTEPS": 1e9,
     "FC_DIM_SIZE": 128,
@@ -491,8 +493,8 @@ wandb.init(
     # track hyperparameters and run metadata
     config=config,
     name=f'seed_{seed}',
-    group='heading',
-    notes='expand the target',
+    group=config['GROUP'],
+    notes='single target',
     dir=config['LOGDIR'],
     reinit=True,
 )
