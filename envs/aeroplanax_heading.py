@@ -18,12 +18,13 @@ from .termination_conditions import (
     safe_return_fn,
     unreach_heading_fn,
 )
+
 from .utils.utils import wrap_PI
 
 
 @struct.dataclass
 class HeadingTaskState(EnvState):
-    target_heading: ArrayLike
+    target_heading: ArrayLike 
     target_altitude: ArrayLike
     target_vt: ArrayLike
 
@@ -37,7 +38,7 @@ class HeadingTaskState(EnvState):
             time=env_state.time,
             target_heading=extra_state[0],
             target_altitude=extra_state[1],
-            target_vt=extra_state[2]
+            target_vt=extra_state[2],
         )
 
 
@@ -69,7 +70,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
 
         self.reward_functions = [
             functools.partial(heading_reward_fn, reward_scale=1.0),
-            functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200)
+            functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
 
         self.termination_conditions = [
@@ -84,11 +85,12 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     def default_params(self) -> HeadingTaskParams:
         return HeadingTaskParams()
 
+
     @functools.partial(jax.jit, static_argnums=(0,))
     def _init_state(
         self,
         key: jax.Array,
-        params: HeadingTaskParams
+        params: HeadingTaskParams,
     ) -> HeadingTaskState:
         state = super()._init_state(key, params)
         state = HeadingTaskState.create(state, extra_state=jnp.zeros((3,)))
@@ -102,9 +104,6 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         params: HeadingTaskParams,
     ) -> HeadingTaskState:
         """Task-specific reset."""
-
-        # NOTE: Heading task support only one agent currently.
-
         key_alt, key_vt = jax.random.split(key)
         altitude = jax.random.uniform(key_alt, shape=(self.num_agents,), minval=params.min_altitude, maxval=params.max_altitude)
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
@@ -133,7 +132,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     def _step_task(
         self,
         key: chex.PRNGKey,
-        state: HeadingTaskState,
+        state: HeadingTaskState, 
         action: Dict[AgentName, chex.Array],
         params: HeadingTaskParams,
     ) -> HeadingTaskState:
@@ -167,7 +166,6 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
             14. ego_Q                  (unit: rad/s)
             15. ego_R                  (unit: rad/s)
         """
-
         altitude = state.plane_state.altitude
         roll, pitch, yaw = state.plane_state.roll, state.plane_state.pitch, state.plane_state.yaw
         vt = state.plane_state.vt
