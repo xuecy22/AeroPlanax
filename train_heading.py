@@ -19,7 +19,7 @@ import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_heading import AeroPlanaxHeadingEnv
+from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -112,8 +112,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env = AeroPlanaxHeadingEnv()
-    env_params = env.default_params
+    env_params = HeadingTaskParams()
+    env = AeroPlanaxHeadingEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config["NUM_UPDATES"] = (
@@ -462,10 +462,10 @@ config = {
     "GROUP": "multi_heading",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 200,
-    "NUM_ACTORS": 10,
+    "NUM_ENVS": 1000,
+    "NUM_ACTORS": 2,
     "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 2e8,
+    "TOTAL_TIMESTEPS": 1e9,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -494,7 +494,7 @@ wandb.init(
     config=config,
     name=f'seed_{seed}',
     group=config['GROUP'],
-    notes='single target',
+    notes='multi target',
     # dir=config['LOGDIR'],
     reinit=True,
 )

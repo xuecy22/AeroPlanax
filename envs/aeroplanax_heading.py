@@ -15,11 +15,15 @@ from .reward_functions import (
     event_driven_reward_fn,
 )
 from .termination_conditions import (
-    safe_return_fn,
+    extreme_state_fn,
+    high_speed_fn,
+    low_altitude_fn,
+    low_speed_fn,
+    overload_fn,
     unreach_heading_fn,
 )
 
-from .utils.utils import wrap_PI
+from .utils.utils import wrap_PI, wedge_formation, line_formation, diamond_formation, enforce_safe_distance
 
 
 @struct.dataclass
@@ -44,9 +48,10 @@ class HeadingTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HeadingTaskParams(EnvParams):
-    num_allies: int = 10
+    num_allies: int = 2
     num_enemies: int = 0
     agent_type: int = 0
+    formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     max_altitude: float = 20000
     min_altitude: float = 19000
     max_vt: float = 1200
@@ -55,11 +60,14 @@ class HeadingTaskParams(EnvParams):
     max_altitude_increment: float = 3000
     max_velocities_u_increment: float = 300
     noise_scale: float = 0.0
+    team_spacing: float = 50000       
+    safe_distance: float = 10000
 
 
 class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     def __init__(self, env_params: Optional[HeadingTaskParams] = None):
         super().__init__(env_params)
+        self.formation_type = env_params.formation_type
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
             agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
@@ -74,7 +82,11 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         ]
 
         self.termination_conditions = [
-            safe_return_fn,
+            extreme_state_fn,
+            high_speed_fn,
+            low_altitude_fn,
+            low_speed_fn,
+            overload_fn,
             unreach_heading_fn,
         ]
 
@@ -93,7 +105,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         params: HeadingTaskParams,
     ) -> HeadingTaskState:
         state = super()._init_state(key, params)
-        state = HeadingTaskState.create(state, extra_state=jnp.zeros((3,)))
+        state = HeadingTaskState.create(state, extra_state=jnp.zeros((3, self.num_agents)))
         return state
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -104,22 +116,21 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         params: HeadingTaskParams,
     ) -> HeadingTaskState:
         """Task-specific reset."""
-        key_alt, key_vt = jax.random.split(key)
-        altitude = jax.random.uniform(key_alt, shape=(self.num_agents,), minval=params.min_altitude, maxval=params.max_altitude)
+        state = self._generate_formation(key, state, params)
+        key, key_vt = jax.random.split(key)
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
 
         key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        delta_heading = jax.random.uniform(key_heading, minval=-params.max_heading_increment, maxval=params.max_heading_increment)
-        delta_altitude = jax.random.uniform(key_altitude_increment, minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
-        delta_vt = jax.random.uniform(key_vt_increment, minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
+        delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
 
-        target_altitude = jnp.mean(altitude) + delta_altitude
-        target_heading = wrap_PI(jnp.mean(state.plane_state.yaw) + delta_heading)
-        target_vt = jnp.mean(vt) + delta_vt
+        target_altitude = state.plane_state.altitude + delta_altitude
+        target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
+        target_vt = vt + delta_vt
 
         state = state.replace(
             plane_state=state.plane_state.replace(
-                altitude=altitude,
                 vt=vt,
             ),
             target_heading=target_heading,
@@ -192,3 +203,34 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
                             alpha_sin, alpha_cos, beta_sin, beta_cos,
                             P, Q, R))
         return {agent: obs[:, i] for i, agent in enumerate(self.agents)}
+    
+    @functools.partial(jax.jit, static_argnums=(0, ))
+    def _generate_formation(
+            self,
+            key: chex.PRNGKey,
+            state: HeadingTaskState,
+            params: HeadingTaskParams,
+        ) -> HeadingTaskState:
+
+        # 根据队形类型选择生成函数
+        if self.formation_type == 0:
+            team_positions = wedge_formation(self.num_allies, params.team_spacing)
+        elif self.formation_type == 1:
+            team_positions = line_formation(self.num_allies, params.team_spacing)
+        elif self.formation_type == 2:
+            team_positions = diamond_formation(self.num_allies, params.team_spacing)
+        else:
+            raise ValueError("Provided formation type is not valid")
+        
+        # 转换为全局坐标并确保安全距离        
+        team_center = jnp.zeros(3)
+        key, key_altitude = jax.random.split(key)
+        altitude = jax.random.uniform(key_altitude, minval=params.min_altitude, maxval=params.max_altitude)
+        team_center =  team_center.at[2].set(altitude)
+        formation_positions = enforce_safe_distance(team_positions, team_center, params.safe_distance)
+        state = state.replace(plane_state=state.plane_state.replace(
+            north=formation_positions[:, 0],
+            east=formation_positions[:, 1],
+            altitude=formation_positions[:, 2]
+        ))
+        return state
