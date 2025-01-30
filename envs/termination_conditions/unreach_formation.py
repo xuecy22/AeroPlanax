@@ -19,7 +19,7 @@ def unreach_formation_fn(
     plane_state: FighterPlaneState = state.plane_state
     target_pos = state.formation_positions[agent_id]
     current_pos = jnp.array([plane_state.north[agent_id], plane_state.east[agent_id], plane_state.altitude[agent_id]])
-    distance = jnp.linalg(target_pos - current_pos) * 0.3048
+    distance = jnp.linalg.norm(target_pos - current_pos) * 0.3048
     check_time = state.time
     # 判断时间
     max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps

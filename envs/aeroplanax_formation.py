@@ -43,7 +43,7 @@ class FormationTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class FormationTaskParams(EnvParams):
-    num_allies: int = 3
+    num_allies: int = 2
     num_enemies: int = 0
     agent_type: int = 0
     action_type: int = 0
@@ -159,6 +159,8 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             15. ego_R                  (unit: rad/s)
         """
         # 从状态中提取变量
+        north = state.plane_state.north
+        east = state.plane_state.east
         altitude = state.plane_state.altitude
         roll, pitch, yaw = state.plane_state.roll, state.plane_state.pitch, state.plane_state.yaw
         vt = state.plane_state.vt
@@ -167,9 +169,9 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
 
         # 计算归一化的观测值
-        norm_delta_altitude = (altitude - state.target_altitude) * 0.3048 / 1000
-        norm_delta_heading = wrap_PI((yaw - state.target_heading))
-        norm_delta_vt = (vt - state.target_vt) * 0.3048 / 340
+        norm_delta_north = (north - state.formation_positions[:, 0]) * 0.3048 / 1000
+        norm_delta_east = (east - state.formation_positions[:, 1]) * 0.3048 / 1000
+        norm_delta_altitude = (altitude - state.formation_positions[:, 2]) * 0.3048 / 1000
         norm_altitude = altitude * 0.3048 / 5000
         roll_sin = jnp.sin(roll)
         roll_cos = jnp.cos(roll)
@@ -182,7 +184,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         beta_cos = jnp.cos(beta)
 
         # 将观测值堆叠成一个数组
-        obs = jnp.vstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
+        obs = jnp.vstack((norm_delta_north, norm_delta_east, norm_delta_altitude,
                             norm_altitude, norm_vt,
                             roll_sin, roll_cos, pitch_sin, pitch_cos,
                             alpha_sin, alpha_cos, beta_sin, beta_cos,
