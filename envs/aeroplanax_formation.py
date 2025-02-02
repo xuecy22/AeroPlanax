@@ -199,7 +199,6 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             params: FormationTaskParams,
         ):
 
-        # 根据队形类型选择生成函数
         if self.formation_type == 0:
             team_positions = wedge_formation(self.num_allies, params.team_spacing)
         elif self.formation_type == 1:
@@ -208,8 +207,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             team_positions = diamond_formation(self.num_allies, params.team_spacing)
         else:
             raise ValueError("Provided formation type is not valid")
-        
-        # 转换为全局坐标并确保安全距离        
+         
         team_center = jnp.zeros(3)
         key, key_altitude = jax.random.split(key)
         altitude = jax.random.uniform(key_altitude, minval=params.min_altitude, maxval=params.max_altitude)
