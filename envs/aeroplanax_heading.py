@@ -15,11 +15,7 @@ from .reward_functions import (
     event_driven_reward_fn,
 )
 from .termination_conditions import (
-    extreme_state_fn,
-    high_speed_fn,
-    low_altitude_fn,
-    low_speed_fn,
-    overload_fn,
+    crashed_fn,
     unreach_heading_fn,
 )
 
@@ -82,11 +78,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         ]
 
         self.termination_conditions = [
-            extreme_state_fn,
-            high_speed_fn,
-            low_altitude_fn,
-            low_speed_fn,
-            overload_fn,
+            crashed_fn,
             unreach_heading_fn,
         ]
 

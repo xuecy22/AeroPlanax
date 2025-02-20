@@ -178,11 +178,10 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 raise NotImplementedError
             elif self.agent_type == 2:
                 raise NotImplementedError
-            if self.num_agents > 1:
-                crashed = jax.vmap(
-                    check_crashed, in_axes=(None, 0)
-                )(next_plane_states, jnp.arange(self.num_agents))
-                next_plane_states = next_plane_states.replace(status=jnp.where(crashed, 2, next_plane_states.status))
+            crashed = jax.vmap(
+                check_crashed, in_axes=(None, 0)
+            )(next_plane_states, jnp.arange(self.num_agents))
+            next_plane_states = next_plane_states.replace(status=jnp.where(crashed, 2, next_plane_states.status))
             if self.num_enemies > 0:
                 blood = jax.vmap(
                     update_blood, in_axes=(None, 0, None)
@@ -340,6 +339,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             successes = jnp.logical_or(successes, new_success)
             # TODO: early stop when all agents are done
         # modify state
+        state = state.replace(
+            plane_state=state.plane_state.replace(
+                status=jnp.where(successes, 4, state.plane_state.status)
+            )
+        )
         state = state.replace(
             done=jnp.all(dones),
             success=jnp.all(successes)

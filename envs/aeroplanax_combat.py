@@ -34,8 +34,8 @@ class CombatTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class CombatTaskParams(EnvParams):
-    num_allies: int = 2
-    num_enemies: int = 3
+    num_allies: int = 100
+    num_enemies: int = 100
     agent_type: int = 0
     action_type: int = 0
     observation_type: int = 0 # 0: unit_list, 1: conic

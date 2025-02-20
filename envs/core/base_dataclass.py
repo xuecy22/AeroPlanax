@@ -8,6 +8,7 @@ class AeroplaneStatus(enum.IntEnum):
     LOCKED = 1
     CRASHED = 2
     SHOTDOWN = 3
+    SUCCESS = 4
 
 
 @struct.dataclass
@@ -38,6 +39,10 @@ class BasePlaneState:
     @property
     def is_shotdown(self):
         return self.status == AeroplaneStatus.SHOTDOWN.value
+    
+    @property
+    def is_success(self):
+        return self.status == AeroplaneStatus.SUCCESS.value
 
     @classmethod
     def create(cls, state: jax.Array):
