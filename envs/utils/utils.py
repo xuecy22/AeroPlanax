@@ -8,7 +8,7 @@ a = 6378137
 b = 6356752.3142
 f = (a - b) / a
 e_sq = f * (2-f)
-pi = 3.14159265359
+pi = jnp.pi
 
 
 def parse_config(filename):
@@ -37,15 +37,15 @@ def _t2n(x):
 def geodetic_to_ecef(lat, lon, h):
     # (lat, lon) in degrees
     # h in meters
-    lamb = math.radians(lat)
-    phi = math.radians(lon)
-    s = math.sin(lamb)
-    N = a / math.sqrt(1 - e_sq * s * s)
+    lamb = jnp.radians(lat)
+    phi = jnp.radians(lon)
+    s = jnp.sin(lamb)
+    N = a / jnp.sqrt(1 - e_sq * s * s)
 
-    sin_lambda = math.sin(lamb)
-    cos_lambda = math.cos(lamb)
-    sin_phi = math.sin(phi)
-    cos_phi = math.cos(phi)
+    sin_lambda = jnp.sin(lamb)
+    cos_lambda = jnp.cos(lamb)
+    sin_phi = jnp.sin(phi)
+    cos_phi = jnp.cos(phi)
 
     x = (h + N) * cos_lambda * cos_phi
     y = (h + N) * cos_lambda * sin_phi
@@ -54,14 +54,14 @@ def geodetic_to_ecef(lat, lon, h):
     return x, y, z
 
 def ecef_to_enu(x, y, z, lat0, lon0, h0):
-    lamb = math.radians(lat0)
-    phi = math.radians(lon0)
-    s = math.sin(lamb)
-    N = a / math.sqrt(1 - e_sq * s * s)
-    sin_lambda = math.sin(lamb)
-    cos_lambda = math.cos(lamb)
-    sin_phi = math.sin(phi)
-    cos_phi = math.cos(phi)
+    lamb = jnp.radians(lat0)
+    phi = jnp.radians(lon0)
+    s = jnp.sin(lamb)
+    N = a / jnp.sqrt(1 - e_sq * s * s)
+    sin_lambda = jnp.sin(lamb)
+    cos_lambda = jnp.cos(lamb)
+    sin_phi = jnp.sin(phi)
+    cos_phi = jnp.cos(phi)
     x0 = (h0 + N) * cos_lambda * cos_phi
     y0 = (h0 + N) * cos_lambda * sin_phi
     z0 = (h0 + (1 - e_sq) * N) * sin_lambda
@@ -75,14 +75,14 @@ def ecef_to_enu(x, y, z, lat0, lon0, h0):
     return xEast, yNorth, zUp
 
 def enu_to_ecef(xEast, yNorth, zUp, lat0, lon0, h0):
-    lamb = math.radians(lat0)
-    phi = math.radians(lon0)
-    s = math.sin(lamb)
-    N = a / math.sqrt(1 - e_sq * s * s)
-    sin_lambda = math.sin(lamb)
-    cos_lambda = math.cos(lamb)
-    sin_phi = math.sin(phi)
-    cos_phi = math.cos(phi)
+    lamb = jnp.radians(lat0)
+    phi = jnp.radians(lon0)
+    s = jnp.sin(lamb)
+    N = a / jnp.sqrt(1 - e_sq * s * s)
+    sin_lambda = jnp.sin(lamb)
+    cos_lambda = jnp.cos(lamb)
+    sin_phi = jnp.sin(phi)
+    cos_phi = jnp.cos(phi)
     x0 = (h0 + N) * cos_lambda * cos_phi
     y0 = (h0 + N) * cos_lambda * sin_phi
     z0 = (h0 + (1 - e_sq) * N) * sin_lambda
@@ -103,27 +103,27 @@ def ecef_to_geodetic(x, y, z):
     z2 = z ** 2 
     a = 6378137.0000    # earth radius in meters
     b = 6356752.3142    # earth semiminor in meters 
-    e = math.sqrt (1 - (b / a) ** 2) 
+    e = jnp.sqrt (1 - (b / a) ** 2) 
     b2 = b * b 
     e2 = e ** 2 
     ep = e * (a / b) 
-    r = math.sqrt(x2 + y2) 
+    r = jnp.sqrt(x2 + y2) 
     r2 = r * r 
     E2 = a ** 2 - b ** 2 
     F = 54 * b2 * z2 
     G = r2 + (1 - e2) * z2 - e2 * E2 
     c = (e2 * e2 * F * r2) / (G * G * G) 
-    s = (1 + c + math.sqrt(c * c + 2 * c)) ** (1 / 3) 
+    s = (1 + c + jnp.sqrt(c * c + 2 * c)) ** (1 / 3) 
     P = F / (3 * (s + 1 / s + 1) ** 2 * G * G) 
-    Q = math.sqrt(1 + 2 * e2 * e2 * P) 
-    ro = -(P * e2 * r) / (1 + Q) + math.sqrt((a * a / 2) * (1 + 1 / Q) - (P * (1 - e2) * z2) / (Q * (1 + Q)) - P * r2 / 2) 
+    Q = jnp.sqrt(1 + 2 * e2 * e2 * P) 
+    ro = -(P * e2 * r) / (1 + Q) + jnp.sqrt((a * a / 2) * (1 + 1 / Q) - (P * (1 - e2) * z2) / (Q * (1 + Q)) - P * r2 / 2) 
     tmp = (r - e2 * ro) ** 2 
-    U = math.sqrt(tmp + z2) 
-    V = math.sqrt(tmp + (1 - e2) * z2) 
+    U = jnp.sqrt(tmp + z2) 
+    V = jnp.sqrt(tmp + (1 - e2) * z2) 
     zo = (b2 * z) / (a * V) 
     height = U * (1 - b2 / (a * V)) 
-    lat = math.atan((z + ep * ep *zo) / r) 
-    temp = math.atan(y / x) 
+    lat = jnp.atan((z + ep * ep *zo) / r) 
+    temp = jnp.atan(y / x) 
     if x >=0 :    
         long = temp 
     elif (x < 0) & (y >= 0):

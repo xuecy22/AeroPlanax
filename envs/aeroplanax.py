@@ -1,6 +1,8 @@
 import functools
 from typing import Any, Dict, List, Callable, Generic, Optional, Tuple, TypeVar
 import chex
+from datetime import datetime
+from pathlib import Path
 from flax import struct
 import jax
 from jax import lax
@@ -10,6 +12,7 @@ from gymnax.environments import spaces
 from .core.simulators import fighterplane, canardplane, uav
 from .core.base_dataclass import BasePlaneState, BaseControlState
 from .core.utils import update_blood, check_crashed, check_locked, check_shotdown
+from .utils.utils import enu_to_geodetic
 
 
 @struct.dataclass
@@ -69,6 +72,8 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
 
         self.reward_functions: List[Callable[[TEnvState, TEnvParams, AgentID], float]] = []
         self.termination_conditions: List[Callable[[TEnvState, TEnvParams, AgentID], Tuple[bool, bool]]] = []
+
+        self.create_records = False
 
     def _get_obs_size(self) -> int:
         raise NotImplementedError
@@ -255,6 +260,41 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             time=0
         )
         return env_state
+    
+    def render(
+        self,
+        state: TEnvState,
+        params: TEnvParams,
+        dones: dict,
+        logdir: str
+    ):
+        """Renders the environment."""
+        Path(logdir).mkdir(parents=True, exist_ok=True)
+        if dones["__all__"]:
+            self.create_records = False
+        if not self.create_records:
+            self.filename = logdir + datetime.now().strftime('%Y-%m-%d-%H-%M-%S.%f') + '.txt.acmi'
+            with open(self.filename, mode='w', encoding='utf-8') as f:
+                f.write("FileType=text/acmi/tacview\n")
+                f.write("FileVersion=2.0\n")
+                f.write("0,ReferenceTime=2023-04-01T00:00:00Z\n")
+            self.create_records = True
+        with open(self.filename, mode='a', encoding='utf-8') as f:
+            timestamp = state.time * params.agent_interaction_steps / params.sim_freq
+            f.write(f"#{timestamp[0]:.2f}\n")
+            for i in range(self.num_agents):
+                npos = state.plane_state.north[i] * 0.3048
+                epos = state.plane_state.east[i] * 0.3048
+                alt = state.plane_state.altitude[i] * 0.3048
+                roll = state.plane_state.roll[i] * 180 / jnp.pi
+                pitch = state.plane_state.pitch[i] * 180 / jnp.pi
+                yaw = state.plane_state.yaw[i] * 180 / jnp.pi
+                lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
+                log_msg = f"{100 + i},T={lon[0]}|{lat[0]}|{alt[0]}|{roll[0]}|{pitch[0]}|{yaw[0]},"
+                log_msg += f"Name=F16,"
+                log_msg += f"Color=Red"
+                if log_msg is not None:
+                    f.write(log_msg + "\n")
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _reset_task(

@@ -459,13 +459,13 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "multi_heading",
+    "GROUP": "heading",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 500,
-    "NUM_ACTORS": 2,
+    "NUM_ENVS": 1000,
+    "NUM_ACTORS": 1,
     "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 5e8,
+    "TOTAL_TIMESTEPS": 1e9,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,

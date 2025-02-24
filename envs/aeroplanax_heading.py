@@ -44,7 +44,7 @@ class HeadingTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HeadingTaskParams(EnvParams):
-    num_allies: int = 2
+    num_allies: int = 1
     num_enemies: int = 0
     agent_type: int = 0
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
