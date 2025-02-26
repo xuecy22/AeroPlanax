@@ -1,6 +1,6 @@
 from typing import Tuple
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
-from ..core.simulators.fighterplane.dynamic import FighterPlaneState
+from ..core.simulators.fighterplane.dynamics import FighterPlaneState
 
 
 def low_speed_fn(
@@ -13,7 +13,7 @@ def low_speed_fn(
     End up the simulation if speed are too low.
     """
     plane_state: FighterPlaneState = state.plane_state
-    velocity: float = plane_state.vt[agent_id] * 0.3048 / 340
+    velocity: float = plane_state.vt[agent_id] / 340
     done = velocity < min_velocity
     success = False
     return done, success

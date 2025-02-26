@@ -45,14 +45,14 @@ class CombatTaskParams(EnvParams):
     max_steps: int = 100
     sim_freq: int = 50
     agent_interaction_steps: int = 20
-    max_altitude: float = 20000
-    min_altitude: float = 19000
-    max_vt: float = 1200
-    min_vt: float = 1000
-    max_distance: float = 500000
-    min_distance: float = 200000
-    team_spacing: float = 50000       
-    safe_distance: float = 10000
+    max_altitude: float = 6000
+    min_altitude: float = 5800
+    max_vt: float = 360
+    min_vt: float = 300
+    max_distance: float = 150000
+    min_distance: float = 60000
+    team_spacing: float = 15000       
+    safe_distance: float = 3000
 
 class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
     def __init__(self, env_params: Optional[CombatTaskParams] = None):
@@ -161,8 +161,8 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         
         # 计算自机和敌机之间的距离
         distance = jnp.linalg.norm(relative_vector, axis=0)
-        norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) * 0.3048 / 340
-        norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) * 0.3048 / 1000
+        norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) / 340
+        norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) / 1000
         norm_AO = dot_product / (distance + 1e-6)  # 防止除以零
         norm_distance = distance / 50000
         features = jnp.hstack((norm_delta_vt, norm_delta_altitude, norm_AO, norm_distance))
@@ -173,12 +173,12 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         altitude = state.plane_state.altitude[i]
         roll, pitch = state.plane_state.roll[i], state.plane_state.pitch[i]
         vt = state.plane_state.vt[i]
-        norm_altitude = altitude * 0.3048 / 5000
+        norm_altitude = altitude / 5000
         roll_sin = jnp.sin(roll)
         roll_cos = jnp.cos(roll)
         pitch_sin = jnp.sin(pitch)
         pitch_cos = jnp.cos(pitch)
-        norm_vt = vt * 0.3048 / 340
+        norm_vt = vt / 340
         empty_features = jnp.zeros(shape=(self.own_features,))
         features = jnp.hstack((norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vt))
         return jax.lax.cond(

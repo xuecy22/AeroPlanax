@@ -48,13 +48,13 @@ class FormationTaskParams(EnvParams):
     agent_type: int = 0
     action_type: int = 0
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
-    max_altitude: float = 20000
-    min_altitude: float = 19000
-    max_vt: float = 1200
-    min_vt: float = 1000
+    max_altitude: float = 6000
+    min_altitude: float = 5800
+    max_vt: float = 360
+    min_vt: float = 300
     noise_scale: float = 0.0
-    team_spacing: float = 50000       
-    safe_distance: float = 10000
+    team_spacing: float = 15000       
+    safe_distance: float = 3000
 
 class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskParams]):
     def __init__(self, env_params: Optional[FormationTaskParams] = None):
@@ -169,15 +169,15 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
 
         # 计算归一化的观测值
-        norm_delta_north = (north - state.formation_positions[:, 0]) * 0.3048 / 1000
-        norm_delta_east = (east - state.formation_positions[:, 1]) * 0.3048 / 1000
-        norm_delta_altitude = (altitude - state.formation_positions[:, 2]) * 0.3048 / 1000
-        norm_altitude = altitude * 0.3048 / 5000
+        norm_delta_north = (north - state.formation_positions[:, 0]) / 1000
+        norm_delta_east = (east - state.formation_positions[:, 1]) / 1000
+        norm_delta_altitude = (altitude - state.formation_positions[:, 2]) / 1000
+        norm_altitude = altitude / 5000
         roll_sin = jnp.sin(roll)
         roll_cos = jnp.cos(roll)
         pitch_sin = jnp.sin(pitch)
         pitch_cos = jnp.cos(pitch)
-        norm_vt = vt * 0.3048 / 340
+        norm_vt = vt / 340
         alpha_sin = jnp.sin(alpha)
         alpha_cos = jnp.cos(alpha)
         beta_sin = jnp.sin(beta)

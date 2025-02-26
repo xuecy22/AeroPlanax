@@ -21,6 +21,11 @@ class BasePlaneState:
     roll: jax.typing.ArrayLike = 0
     pitch: jax.typing.ArrayLike = 0
     yaw: jax.typing.ArrayLike = 0
+    # velocity
+    vel_x: jax.typing.ArrayLike = 0
+    vel_y: jax.typing.ArrayLike = 0
+    vel_z: jax.typing.ArrayLike = 0
+    vt: jax.typing.ArrayLike = 0
     status: jax.typing.ArrayLike = AeroplaneStatus.ALIVE.value
     blood: jax.typing.ArrayLike = 100.0
 
@@ -53,7 +58,10 @@ class BasePlaneState:
             roll=state[3],
             pitch=state[4],
             yaw=state[5],
-            status=state[6],
+            vel_x=state[6],
+            vel_y=state[7],
+            vel_z=state[8],
+            vt=state[9],
         )
 
 
@@ -71,4 +79,59 @@ class BaseControlState:
             elevator=action[1],
             aileron=action[2],
             rudder=action[3],
+        )
+
+
+class MissileStatus(enum.IntEnum):
+    INACTIVE = -1
+    LAUNCHED = 0
+    HIT = 1
+    MISS = 2
+
+
+@struct.dataclass
+class BaseMissileState:
+    # Position
+    north: jax.typing.ArrayLike = 0
+    east: jax.typing.ArrayLike = 0
+    altitude: jax.typing.ArrayLike = 0
+    # Posture
+    roll: jax.typing.ArrayLike = 0
+    pitch: jax.typing.ArrayLike = 0
+    yaw: jax.typing.ArrayLike = 0
+    # velocity
+    vel_x: jax.typing.ArrayLike = 0
+    vel_y: jax.typing.ArrayLike = 0
+    vel_z: jax.typing.ArrayLike = 0
+    vt: jax.typing.ArrayLike = 0
+    status: jax.typing.ArrayLike = MissileStatus.INACTIVE.value
+
+    @property
+    def is_alive(self):
+        """Missile is still flying"""
+        return self.status == MissileStatus.LAUNCHED
+
+    @property
+    def is_success(self):
+        """Missile has hit the target"""
+        return self.status == MissileStatus.HIT
+
+    @property
+    def is_done(self):
+        """Missile is already exploded"""
+        return self.status == MissileStatus.HIT or self.status == MissileStatus.MISS
+
+    @classmethod
+    def create(cls, state: jax.Array):
+        return cls(
+            north=state[0],
+            east=state[1],
+            altitude=state[2],
+            roll=state[3],
+            pitch=state[4],
+            yaw=state[5],
+            vel_x=state[6],
+            vel_y=state[7],
+            vel_z=state[8],
+            vt=state[9],
         )

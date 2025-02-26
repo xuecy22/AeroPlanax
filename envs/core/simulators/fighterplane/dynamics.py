@@ -10,8 +10,6 @@ class FighterPlaneState(BasePlaneState):
     # posture
     alpha: jax.typing.ArrayLike = 0
     beta: jax.typing.ArrayLike = 0
-    # velocity
-    vt: jax.typing.ArrayLike = 0
     # angular velocity
     P: jax.typing.ArrayLike = 0
     Q: jax.typing.ArrayLike = 0
@@ -33,17 +31,20 @@ class FighterPlaneState(BasePlaneState):
             roll=state[3],
             pitch=state[4],
             yaw=state[5],
-            alpha=state[6],
-            beta=state[7],
-            vt=state[8],
-            P=state[9],
-            Q=state[10],
-            R=state[11],
-            T=state[12],
-            el=state[13],
-            ail=state[14],
-            rud=state[15],
-            overload=state[16],
+            vel_x=state[6],
+            vel_y=state[7],
+            vel_z=state[8],
+            vt=state[9],
+            alpha=state[10],
+            beta=state[11],
+            P=state[12],
+            Q=state[13],
+            R=state[14],
+            T=state[15],
+            el=state[16],
+            ail=state[17],
+            rud=state[18],
+            overload=state[19],
         )
 
 
@@ -269,11 +270,10 @@ def nlplant(xu):
 
     return xdot
 
-
 def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float) -> FighterPlaneState:
-    x = jnp.hstack((state.north, state.east, state.altitude,
+    x = jnp.hstack((state.north / 0.3048, state.east / 0.3048, state.altitude / 0.3048,
                     state.roll, state.pitch, state.yaw,
-                    state.vt, state.alpha, state.beta,
+                    state.vt / 0.3048, state.alpha, state.beta,
                     state.P, state.Q, state.R))
     T = 0.9 * state.T + 0.1 * action.throttle * 0.225 * 76300 / 0.3048
     el = 0.9 * state.el + 0.1 * action.elevator * 45
@@ -287,9 +287,10 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
     overload = jnp.sqrt(nx_cg ** 2 + ny_cg ** 2 + nz_cg ** 2)
     new_x = x + xdot[:12] * dt
     new_state = state.replace(
-        north=new_x[0], east=new_x[1], altitude=new_x[2],
+        north=new_x[0] * 0.3048, east=new_x[1] * 0.3048, altitude=new_x[2] * 0.3048,
         roll=new_x[3], pitch=new_x[4], yaw=new_x[5],
-        vt=new_x[6], alpha=new_x[7], beta=new_x[8],
+        vel_x=xdot[0] * 0.3048, vel_y=xdot[1] * 0.3048, vel_z=xdot[2] * 0.3048,
+        vt=new_x[6] * 0.3048, alpha=new_x[7], beta=new_x[8],
         P=new_x[9], Q=new_x[10], R=new_x[11],
         T=T, el=el, ail=ail, rud=rud,
         overload=overload

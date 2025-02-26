@@ -6,7 +6,7 @@ def low_altitude_fn(
     state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
-    altitude_limit: float = 2500
+    altitude_limit: float = 750
 ) -> Tuple[bool, bool]:
     """
     End up the simulation if altitude are too low.

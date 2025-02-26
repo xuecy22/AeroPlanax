@@ -1,6 +1,6 @@
 from typing import Tuple
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
-from ..core.simulators.fighterplane.dynamic import FighterPlaneState
+from ..core.simulators.fighterplane.dynamics import FighterPlaneState
 
 import jax.numpy as jnp
 from ..utils.utils import wrap_PI
@@ -29,9 +29,9 @@ def unreach_heading_fn(
     # 判断是否到达target_heading
     mask3 = jnp.abs(wrap_PI(yaw - state.target_heading[agent_id])) < jnp.pi / 36
     # 判断是否到达target_altitude
-    mask4 = jnp.abs(altitude - state.target_altitude[agent_id]) < 100
+    mask4 = jnp.abs(altitude - state.target_altitude[agent_id]) < 30
     # 判断是否到达target_vt
-    mask5 = jnp.abs(vt - state.target_vt[agent_id]) < 20
+    mask5 = jnp.abs(vt - state.target_vt[agent_id]) < 6
 
     # 当达到目标且时间符合要求时, 任务成功
     success = mask1 & mask2 & mask3 & mask4 & mask5

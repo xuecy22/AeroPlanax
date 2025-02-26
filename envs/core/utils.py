@@ -22,16 +22,16 @@ def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alph
     return done
 
 def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3) -> BasePlaneState:
-    velocity = state.vt[agent_id] * 0.3048 / 340
+    velocity = state.vt[agent_id] / 340
     done = velocity > max_velocity
     return done
 
 def check_low_speed(state: BasePlaneState, agent_id, min_velocity=0.01) -> BasePlaneState:
-    velocity = state.vt[agent_id] * 0.3048 / 340
+    velocity = state.vt[agent_id] / 340
     done = velocity < min_velocity
     return done
 
-def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=2500) -> BasePlaneState:
+def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=750) -> BasePlaneState:
     altitude = state.altitude[agent_id]
     done = altitude < altitude_limit
     return done
@@ -50,7 +50,7 @@ def check_crashed(state: BasePlaneState, agent_id) -> BasePlaneState:
     crashed = mask1 | mask2 | mask3 | mask4 | mask5 | mask6
     return crashed
 
-def check_locked(num_allies, state: BasePlaneState, agent_id, R=100000, angle=jnp.pi/3) -> BasePlaneState:
+def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp.pi/3) -> BasePlaneState:
     cur_pos = jnp.hstack((state.north[agent_id], state.east[agent_id], state.altitude[agent_id]))
     cur_pos = cur_pos.reshape(-1, 1)
     enemy_pos = jnp.vstack((state.north, state.east, state.altitude))

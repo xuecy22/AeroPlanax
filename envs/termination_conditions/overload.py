@@ -1,6 +1,6 @@
 from typing import Tuple
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
-from ..core.simulators.fighterplane.dynamic import FighterPlaneState
+from ..core.simulators.fighterplane.dynamics import FighterPlaneState
 
 
 def overload_fn(

@@ -48,16 +48,16 @@ class HeadingTaskParams(EnvParams):
     num_enemies: int = 0
     agent_type: int = 0
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
-    max_altitude: float = 20000
-    min_altitude: float = 19000
-    max_vt: float = 1200
-    min_vt: float = 1000
+    max_altitude: float = 6000
+    min_altitude: float = 5800
+    max_vt: float = 360
+    min_vt: float = 300
     max_heading_increment: float = 3
-    max_altitude_increment: float = 3000
-    max_velocities_u_increment: float = 300
+    max_altitude_increment: float = 900
+    max_velocities_u_increment: float = 90
     noise_scale: float = 0.0
-    team_spacing: float = 50000       
-    safe_distance: float = 10000
+    team_spacing: float = 15000       
+    safe_distance: float = 3000
 
 
 class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
@@ -176,15 +176,15 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         beta = state.plane_state.beta
         P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
 
-        norm_delta_altitude = (altitude - state.target_altitude) * 0.3048 / 1000
+        norm_delta_altitude = (altitude - state.target_altitude) / 1000
         norm_delta_heading = wrap_PI((yaw - state.target_heading))
-        norm_delta_vt = (vt - state.target_vt) * 0.3048 / 340
-        norm_altitude = altitude * 0.3048 / 5000
+        norm_delta_vt = (vt - state.target_vt) / 340
+        norm_altitude = altitude / 5000
         roll_sin = jnp.sin(roll)
         roll_cos = jnp.cos(roll)
         pitch_sin = jnp.sin(pitch)
         pitch_cos = jnp.cos(pitch)
-        norm_vt = vt * 0.3048 / 340
+        norm_vt = vt / 340
         alpha_sin = jnp.sin(alpha)
         alpha_cos = jnp.cos(alpha)
         beta_sin = jnp.sin(beta)

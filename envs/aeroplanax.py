@@ -29,6 +29,7 @@ class EnvState:
 class EnvParams(environment.EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
+    num_missiles: int = 0
     agent_type: int = 0  # 0: fighterplane, 1: canardplane, 2: uav  TODO: heterogeneous agents
     action_type: int = 0 # 0: continuous, 1: discrete
     max_steps: int = 100
@@ -174,6 +175,27 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
 
         actions: BaseControlState = self._decode_actions(key, state, actions)
 
+        def update_plane_status(plane_states: BasePlaneState):
+            crashed = jax.vmap(
+                check_crashed, in_axes=(None, 0)
+            )(plane_states, jnp.arange(self.num_agents))
+            plane_states = plane_states.replace(status=jnp.where(crashed, 2, plane_states.status))
+            if self.num_enemies > 0:
+                blood = jax.vmap(
+                    update_blood, in_axes=(None, 0, None)
+                )(plane_states, jnp.arange(self.num_agents), 1 / params.sim_freq)
+                plane_states = plane_states.replace(blood=blood)
+                locked = jax.vmap(
+                    check_locked, in_axes=(None, None, 0)
+                )(self.num_allies, plane_states, jnp.arange(self.num_agents))
+                shotdown = jax.vmap(
+                    check_shotdown, in_axes=(None, 0)
+                )(plane_states, jnp.arange(self.num_agents))
+                plane_states = plane_states.replace(status=jnp.where(locked, 1, plane_states.status))
+                plane_states = plane_states.replace(status=jnp.where(crashed, 2, plane_states.status))
+                plane_states = plane_states.replace(status=jnp.where(shotdown, 3, plane_states.status))
+            return plane_states
+
         def step_sim_fn(plane_states: BasePlaneState, _):
             if self.agent_type == 0:
                 next_plane_states = jax.vmap(
@@ -183,23 +205,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 raise NotImplementedError
             elif self.agent_type == 2:
                 raise NotImplementedError
-            crashed = jax.vmap(
-                check_crashed, in_axes=(None, 0)
-            )(next_plane_states, jnp.arange(self.num_agents))
-            next_plane_states = next_plane_states.replace(status=jnp.where(crashed, 2, next_plane_states.status))
-            if self.num_enemies > 0:
-                blood = jax.vmap(
-                    update_blood, in_axes=(None, 0, None)
-                )(next_plane_states, jnp.arange(self.num_agents), 1 / params.sim_freq)
-                next_plane_states = next_plane_states.replace(blood=blood)
-                locked = jax.vmap(
-                    check_locked, in_axes=(None, None, 0)
-                )(self.num_allies, next_plane_states, jnp.arange(self.num_agents))
-                shotdown = jax.vmap(
-                    check_shotdown, in_axes=(None, 0)
-                )(next_plane_states, jnp.arange(self.num_agents))
-                next_plane_states = next_plane_states.replace(status=jnp.where(locked, 1, next_plane_states.status))
-                next_plane_states = next_plane_states.replace(status=jnp.where(shotdown, 3, next_plane_states.status))
+            next_plane_states = update_plane_status(next_plane_states)
             return next_plane_states, True
 
         new_plane_state, _ = jax.lax.scan(
@@ -244,7 +250,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         if self.agent_type == 0:
             aeroplane_state = jax.vmap(
                 fighterplane.FighterPlaneState.create
-            )(jnp.zeros((self.num_agents, 17)))
+            )(jnp.zeros((self.num_agents, 20)))
             aeroplane_control_state = jax.vmap(
                 fighterplane.FighterPlaneControlState.create
             )(jnp.zeros((self.num_agents, 4)))
@@ -283,9 +289,9 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             timestamp = state.time * params.agent_interaction_steps / params.sim_freq
             f.write(f"#{timestamp[0]:.2f}\n")
             for i in range(self.num_agents):
-                npos = state.plane_state.north[i] * 0.3048
-                epos = state.plane_state.east[i] * 0.3048
-                alt = state.plane_state.altitude[i] * 0.3048
+                npos = state.plane_state.north[i]
+                epos = state.plane_state.east[i]
+                alt = state.plane_state.altitude[i]
                 roll = state.plane_state.roll[i] * 180 / jnp.pi
                 pitch = state.plane_state.pitch[i] * 180 / jnp.pi
                 yaw = state.plane_state.yaw[i] * 180 / jnp.pi

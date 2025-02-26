@@ -1,1 +1,1 @@
-from .dynamic import FighterPlaneState, FighterPlaneControlState, update
+from .dynamics import FighterPlaneState, FighterPlaneControlState, update
