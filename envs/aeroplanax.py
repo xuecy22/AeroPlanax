@@ -267,7 +267,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 )(missile_states, next_plane_states, 1 / params.sim_freq)
             else:
                 next_missile_states = missile_states
-            next_plane_state, next_missile_states = update_status(next_plane_states, next_missile_states)
+            next_plane_states, next_missile_states = update_status(next_plane_states, next_missile_states)
             next_states = (next_plane_states, next_missile_states)
             return next_states, True
 
