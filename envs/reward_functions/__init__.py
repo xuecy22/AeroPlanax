@@ -1,3 +1,4 @@
 from .heading_reward import heading_reward_fn
 from .event_driven_reward import event_driven_reward_fn
 from .formation_reward import formation_reward_fn
+from .missile_posture_reward import missile_posture_reward_fn

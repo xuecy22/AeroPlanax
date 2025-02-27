@@ -33,6 +33,7 @@ class FormationTaskState(EnvState):
     def create(cls, env_state: EnvState, formation_positions: Array):
         return cls(
             plane_state=env_state.plane_state,
+            missile_state=env_state.missile_state,
             control_state=env_state.control_state,
             done=env_state.done,
             success=env_state.success,
@@ -96,7 +97,6 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         params: FormationTaskParams,
     ) -> FormationTaskState:
         state = super()._init_state(key, params)
-
         state = FormationTaskState.create(state, formation_positions=jnp.zeros((self.num_agents, 3)))
         return state
     

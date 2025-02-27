@@ -181,22 +181,27 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             # 通用状态更新逻辑
             def update_plane_status(plane_states, crashed, shotdown, locked):
                 plane_alive = plane_states.is_alive | plane_states.is_locked
-                return plane_states.replace(
+                plane_states = plane_states.replace(
                     status=jnp.where(jnp.logical_and(locked, plane_alive), 1, plane_states.status)
-                ).replace(
+                )
+                plane_states = plane_states.replace(
                     status=jnp.where(jnp.logical_and(crashed, plane_alive), 2, plane_states.status)
-                ).replace(
+                )
+                plane_states = plane_states.replace(
                     status=jnp.where(jnp.logical_and(shotdown, plane_alive), 3, plane_states.status)
                 )
+                return plane_states
 
             # 更新导弹状态
             def update_missile_status(missile_states, hit, miss):
                 missile_alive = missile_states.is_alive
-                return missile_states.replace(
+                missile_states = missile_states.replace(
                     status=jnp.where(jnp.logical_and(missile_alive, hit), 1, missile_states.status)
-                ).replace(
+                )
+                missile_states = missile_states.replace(
                     status=jnp.where(jnp.logical_and(missile_alive, miss), 2, missile_states.status)
                 )
+                return missile_states
 
             # 计算通用状态
             crashed = jax.vmap(
@@ -330,7 +335,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         else:
             missile_state = jax.vmap(
                 missile.MissileState.create
-            )(jnp.zeros(1, 10))
+            )(jnp.zeros((1, 10)))
         env_state = EnvState(
             plane_state=aeroplane_state,
             missile_state=missile_state,

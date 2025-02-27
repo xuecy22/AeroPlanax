@@ -295,6 +295,6 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
         T=T, el=el, ail=ail, rud=rud,
         overload=overload
     )
-    mask = state.is_crashed | state.is_shotdown | state.is_success
-    state = jax.lax.cond(mask, lambda: state, lambda: new_state)
+    mask = state.is_alive | state.is_locked
+    state = jax.lax.cond(mask, lambda: new_state, lambda: state)
     return state

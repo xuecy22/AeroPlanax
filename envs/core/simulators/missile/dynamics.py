@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 from flax import struct
 from ...base_dataclass import BaseMissileState, BasePlaneState
-from ....aeroplanax import AgentID
 
 
 @struct.dataclass
@@ -57,7 +56,7 @@ def rho(alt):
 
 def launch(missile_state: MissileState, 
            plane_state: BasePlaneState, 
-           target_id: AgentID,) -> MissileState:
+           target_id) -> MissileState:
     yaw = jnp.atan2(plane_state.north[target_id] - missile_state.north,
                     plane_state.east[target_id] - missile_state.east)
     Rxy = jnp.linalg.norm([plane_state.north[target_id] - missile_state.north, 

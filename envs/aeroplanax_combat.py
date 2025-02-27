@@ -25,6 +25,7 @@ class CombatTaskState(EnvState):
     def create(cls, env_state: EnvState):
         return cls(
             plane_state=env_state.plane_state,
+            missile_state=env_state.missile_state,
             control_state=env_state.control_state,
             done=env_state.done,
             success=env_state.success,

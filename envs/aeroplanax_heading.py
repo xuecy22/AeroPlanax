@@ -32,6 +32,7 @@ class HeadingTaskState(EnvState):
     def create(cls, env_state: EnvState, extra_state: Array):
         return cls(
             plane_state=env_state.plane_state,
+            missile_state=env_state.missile_state,
             control_state=env_state.control_state,
             done=env_state.done,
             success=env_state.success,
@@ -46,6 +47,7 @@ class HeadingTaskState(EnvState):
 class HeadingTaskParams(EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
+    num_missiles: int = 0
     agent_type: int = 0
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     max_altitude: float = 6000
