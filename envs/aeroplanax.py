@@ -9,15 +9,16 @@ from jax import lax
 import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
-from .core.simulators import fighterplane, canardplane, uav
-from .core.base_dataclass import BasePlaneState, BaseControlState
-from .core.utils import update_blood, check_crashed, check_locked, check_shotdown
+from .core.simulators import fighterplane, canardplane, uav, missile
+from .core.base_dataclass import BasePlaneState, BaseControlState, BaseMissileState
+from .core.utils import update_blood, check_crashed, check_locked, check_shotdown, check_shotdown_by_missile, check_hit, check_miss
 from .utils.utils import enu_to_geodetic
 
 
 @struct.dataclass
 class EnvState:
     plane_state: BasePlaneState
+    missile_state: BaseMissileState
     control_state: BaseControlState
     # task state
     done: bool
@@ -61,6 +62,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self.num_agents: int = env_params.num_allies + env_params.num_enemies
         self.num_allies: int = env_params.num_allies
         self.num_enemies: int = env_params.num_enemies
+        self.num_missiles: int = env_params.num_missiles
         self.agents: List[AgentName] = [f"ally_{i}" for i in range(env_params.num_allies)] + [
             f"enemy_{i}" for i in range(env_params.num_enemies)
         ]
@@ -175,28 +177,82 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
 
         actions: BaseControlState = self._decode_actions(key, state, actions)
 
-        def update_plane_status(plane_states: BasePlaneState):
+        def update_status(plane_states: BasePlaneState, missile_states: BaseMissileState):
+            # 通用状态更新逻辑
+            def update_plane_status(plane_states, crashed, shotdown, locked):
+                plane_alive = plane_states.is_alive | plane_states.is_locked
+                return plane_states.replace(
+                    status=jnp.where(jnp.logical_and(locked, plane_alive), 1, plane_states.status)
+                ).replace(
+                    status=jnp.where(jnp.logical_and(crashed, plane_alive), 2, plane_states.status)
+                ).replace(
+                    status=jnp.where(jnp.logical_and(shotdown, plane_alive), 3, plane_states.status)
+                )
+
+            # 更新导弹状态
+            def update_missile_status(missile_states, hit, miss):
+                missile_alive = missile_states.is_alive
+                return missile_states.replace(
+                    status=jnp.where(jnp.logical_and(missile_alive, hit), 1, missile_states.status)
+                ).replace(
+                    status=jnp.where(jnp.logical_and(missile_alive, miss), 2, missile_states.status)
+                )
+
+            # 计算通用状态
             crashed = jax.vmap(
                 check_crashed, in_axes=(None, 0)
-            )(plane_states, jnp.arange(self.num_agents))
-            plane_states = plane_states.replace(status=jnp.where(crashed, 2, plane_states.status))
-            if self.num_enemies > 0:
-                blood = jax.vmap(
-                    update_blood, in_axes=(None, 0, None)
+                )(plane_states, jnp.arange(self.num_agents))
+            blood = jax.vmap(
+                update_blood, in_axes=(None, 0, None)
                 )(plane_states, jnp.arange(self.num_agents), 1 / params.sim_freq)
-                plane_states = plane_states.replace(blood=blood)
+            plane_states = plane_states.replace(blood=blood)
+
+            # 创建与 locked 形状相同的全 False 数组
+            false_locked = jnp.zeros_like(crashed, dtype=bool)  # 确保类型和形状一致
+
+            # 根据场景更新状态
+            if self.num_enemies > 0:
                 locked = jax.vmap(
                     check_locked, in_axes=(None, None, 0)
-                )(self.num_allies, plane_states, jnp.arange(self.num_agents))
+                    )(self.num_allies, plane_states, jnp.arange(self.num_agents))
                 shotdown = jax.vmap(
                     check_shotdown, in_axes=(None, 0)
-                )(plane_states, jnp.arange(self.num_agents))
-                plane_states = plane_states.replace(status=jnp.where(locked, 1, plane_states.status))
-                plane_states = plane_states.replace(status=jnp.where(crashed, 2, plane_states.status))
-                plane_states = plane_states.replace(status=jnp.where(shotdown, 3, plane_states.status))
-            return plane_states
+                    )(plane_states, jnp.arange(self.num_agents))
 
-        def step_sim_fn(plane_states: BasePlaneState, _):
+                if self.num_missiles > 0:
+                    shotdown_by_missile = jax.vmap(
+                        check_shotdown_by_missile, in_axes=(None, 0)
+                        )(plane_states, missile_states, jnp.arange(self.num_agents))
+                    shotdown = shotdown_by_missile | shotdown
+                    hit = jax.vmap(
+                        check_hit, in_axes=(None, None, 0)
+                        )(plane_states, missile_states, jnp.arange(self.num_missiles))
+                    miss = jax.vmap(
+                        check_miss, in_axes=(None, 0)
+                        )(missile_states, jnp.arange(self.num_missiles))
+                    missile_states = update_missile_status(missile_states, hit, miss)
+
+                plane_states = update_plane_status(plane_states, crashed, shotdown, locked)
+
+            elif self.num_missiles > 0:
+                shotdown_by_missile = jax.vmap(
+                    check_shotdown_by_missile, in_axes=(None, 0)
+                    )(plane_states, missile_states, jnp.arange(self.num_agents))
+                hit = jax.vmap(
+                    check_hit, in_axes=(None, None, 0)
+                    )(plane_states, missile_states, jnp.arange(self.num_missiles))
+                miss = jax.vmap(
+                    check_miss, in_axes=(None, 0)
+                    )(missile_states, jnp.arange(self.num_missiles))
+                missile_states = update_missile_status(missile_states, hit, miss)
+                plane_states = update_plane_status(plane_states, crashed, shotdown_by_missile, false_locked)  # 使用 false_locked
+
+            else:
+                plane_states = update_plane_status(plane_states, crashed, false_locked, false_locked)  # 使用 false_locked
+            return plane_states, missile_states
+
+        def step_sim_fn(state, _):
+            plane_states, missile_states = state
             if self.agent_type == 0:
                 next_plane_states = jax.vmap(
                     fighterplane.update, in_axes=(0, 0, None)
@@ -205,17 +261,26 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 raise NotImplementedError
             elif self.agent_type == 2:
                 raise NotImplementedError
-            next_plane_states = update_plane_status(next_plane_states)
-            return next_plane_states, True
+            if self.num_missiles > 0:
+                next_missile_states = jax.vmap(
+                    missile.update, in_axes=(0, None, None)
+                )(missile_states, next_plane_states, 1 / params.sim_freq)
+            else:
+                next_missile_states = missile_states
+            next_plane_state, next_missile_states = update_status(next_plane_states, next_missile_states)
+            next_states = (next_plane_states, next_missile_states)
+            return next_states, True
 
-        new_plane_state, _ = jax.lax.scan(
+        new_state, _ = jax.lax.scan(
             step_sim_fn,
-            init=state.plane_state,
+            init=(state.plane_state, state.missile_state),
             xs=None,
             length=self.agent_interaction_steps,
         )
+        new_plane_state, new_missile_state = new_state
         state_st = state.replace(
             plane_state=new_plane_state,
+            missile_state=new_missile_state,
             time=state.time + 1
         )
         state_st = self._step_task(key, state_st, actions, params)
@@ -258,8 +323,17 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             raise NotImplementedError
         elif self.agent_type == 2:
             raise NotImplementedError
+        if self.num_missiles > 0:
+            missile_state = jax.vmap(
+                missile.MissileState.create
+            )(jnp.zeros(self.num_missiles, 10))
+        else:
+            missile_state = jax.vmap(
+                missile.MissileState.create
+            )(jnp.zeros(1, 10))
         env_state = EnvState(
             plane_state=aeroplane_state,
+            missile_state=missile_state,
             control_state=aeroplane_control_state,
             done=False,
             success=False,

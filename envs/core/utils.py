@@ -1,19 +1,21 @@
 import jax
 import functools
 import jax.numpy as jnp
-from .base_dataclass import BasePlaneState
+from .base_dataclass import BasePlaneState, BaseMissileState
 
 
-def check_collision(state: BasePlaneState, agent_id, R=50) -> BasePlaneState:
+def check_collision(state: BasePlaneState, agent_id, R=50):
+    alive = state.is_alive | state.is_locked
     cur_pos = jnp.hstack((state.north[agent_id], state.east[agent_id], state.altitude[agent_id]))
     cur_pos = cur_pos.reshape(-1, 1)
     position = jnp.vstack((state.north, state.east, state.altitude))
     distance = jnp.linalg.norm(cur_pos - position, axis=0)
     distance = distance.at[agent_id].set(jnp.finfo(jnp.float32).max)
+    distance = jnp.where(alive, distance, jnp.finfo(jnp.float32).max)
     done = jnp.any(distance < R)
     return done
 
-def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-30, max_beta=30) -> BasePlaneState:
+def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-30, max_beta=30):
     alpha = state.alpha[agent_id] * 180 / jnp.pi
     beta = state.beta[agent_id] * 180 / jnp.pi
     mask1 = (alpha < min_alpha) | (alpha > max_alpha)
@@ -21,26 +23,26 @@ def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alph
     done = mask1 | mask2
     return done
 
-def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3) -> BasePlaneState:
+def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3):
     velocity = state.vt[agent_id] / 340
     done = velocity > max_velocity
     return done
 
-def check_low_speed(state: BasePlaneState, agent_id, min_velocity=0.01) -> BasePlaneState:
+def check_low_speed(state: BasePlaneState, agent_id, min_velocity=0.01):
     velocity = state.vt[agent_id] / 340
     done = velocity < min_velocity
     return done
 
-def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=750) -> BasePlaneState:
+def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=750):
     altitude = state.altitude[agent_id]
     done = altitude < altitude_limit
     return done
 
-def check_overload(state: BasePlaneState, agent_id, max_overload=10) -> BasePlaneState:
+def check_overload(state: BasePlaneState, agent_id, max_overload=10):
     done = state.overload[agent_id] > max_overload
     return done
 
-def check_crashed(state: BasePlaneState, agent_id) -> BasePlaneState:
+def check_crashed(state: BasePlaneState, agent_id):
     mask1 = check_collision(state, agent_id)
     mask2 = check_extreme_state(state, agent_id)
     mask3 = check_high_speed(state, agent_id)
@@ -50,7 +52,7 @@ def check_crashed(state: BasePlaneState, agent_id) -> BasePlaneState:
     crashed = mask1 | mask2 | mask3 | mask4 | mask5 | mask6
     return crashed
 
-def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp.pi/3) -> BasePlaneState:
+def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp.pi/3):
     cur_pos = jnp.hstack((state.north[agent_id], state.east[agent_id], state.altitude[agent_id]))
     cur_pos = cur_pos.reshape(-1, 1)
     enemy_pos = jnp.vstack((state.north, state.east, state.altitude))
@@ -77,12 +79,38 @@ def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp
     mask = jax.lax.select(agent_id < num_allies,
                           jnp.where(jnp.arange(mask.shape[0]) < num_allies, False, mask),
                           jnp.where(jnp.arange(mask.shape[0]) >= num_allies, False, mask))
+    alive = state.is_alive | state.is_locked
+    mask = jnp.where(alive, mask, False)
     locked = jnp.any(mask)
     return locked
 
-def check_shotdown(state: BasePlaneState, agent_id) -> BasePlaneState:
+def check_shotdown(state: BasePlaneState, agent_id):
     shotdown = state.blood[agent_id] < 0
     return shotdown
 
-def update_blood(state: BasePlaneState, agent_id, dt) -> BasePlaneState:
-    return state.blood[agent_id] - 20 * dt
+def check_shotdown_by_missile(plane_state: BasePlaneState, missile_state: BaseMissileState, agent_id, Rc=300):
+    alive = missile_state.is_alive
+    cur_pos = jnp.hstack((plane_state.north[agent_id], plane_state.east[agent_id], plane_state.altitude[agent_id]))
+    cur_pos = cur_pos.reshape(-1, 1)
+    position = jnp.vstack((missile_state.north, missile_state.east, missile_state.altitude))
+    distance = jnp.linalg.norm(cur_pos - position, axis=0)
+    distance = jnp.where(alive, distance, jnp.finfo(jnp.float32).max)
+    shotdown = jnp.any(distance < Rc)
+    return shotdown
+
+def check_miss(state: BaseMissileState, agent_id, t_max=60):
+    miss = state.time[agent_id] > t_max
+    return miss
+
+def check_hit(plane_state: BasePlaneState, missile_state: BaseMissileState, agent_id, Rc=300):
+    alive = plane_state.is_alive
+    cur_pos = jnp.hstack((missile_state.north[agent_id], missile_state.east[agent_id], missile_state.altitude[agent_id]))
+    cur_pos = cur_pos.reshape(-1, 1)
+    position = jnp.vstack((plane_state.north, plane_state.east, plane_state.altitude))
+    distance = jnp.linalg.norm(cur_pos - position, axis=0)
+    distance = jnp.where(alive, distance, jnp.finfo(jnp.float32).max)
+    hit = jnp.any(distance < Rc)
+    return hit
+
+def update_blood(state: BasePlaneState, agent_id, dt):
+    return state.blood[agent_id] - 20 * dt * state.is_locked[agent_id]
