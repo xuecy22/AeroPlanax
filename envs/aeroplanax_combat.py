@@ -37,6 +37,7 @@ class CombatTaskState(EnvState):
 class CombatTaskParams(EnvParams):
     num_allies: int = 100
     num_enemies: int = 100
+    num_missiles: int = 0
     agent_type: int = 0
     action_type: int = 0
     observation_type: int = 0 # 0: unit_list, 1: conic
@@ -165,7 +166,7 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) / 340
         norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) / 1000
         norm_AO = dot_product / (distance + 1e-6)  # 防止除以零
-        norm_distance = distance / 50000
+        norm_distance = distance / 10000
         features = jnp.hstack((norm_delta_vt, norm_delta_altitude, norm_AO, norm_distance))
         return features
 

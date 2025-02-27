@@ -1,1 +1,1 @@
-from .dynamics import MissileState, update
+from .dynamics import MissileState, update, launch

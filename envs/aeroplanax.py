@@ -241,7 +241,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
 
             elif self.num_missiles > 0:
                 shotdown_by_missile = jax.vmap(
-                    check_shotdown_by_missile, in_axes=(None, 0)
+                    check_shotdown_by_missile, in_axes=(None, None, 0)
                     )(plane_states, missile_states, jnp.arange(self.num_agents))
                 hit = jax.vmap(
                     check_hit, in_axes=(None, None, 0)
@@ -331,7 +331,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         if self.num_missiles > 0:
             missile_state = jax.vmap(
                 missile.MissileState.create
-            )(jnp.zeros(self.num_missiles, 10))
+            )(jnp.zeros((self.num_missiles, 10)))
         else:
             missile_state = jax.vmap(
                 missile.MissileState.create

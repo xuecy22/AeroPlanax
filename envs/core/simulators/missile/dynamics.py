@@ -6,11 +6,12 @@ from ...base_dataclass import BaseMissileState, BasePlaneState
 
 @struct.dataclass
 class MissileState(BaseMissileState):
-    m: jax.typing.ArrayLike = 84
+    m: jax.typing.ArrayLike = 84.0
     target_aircraft: jax.typing.ArrayLike = 0
-    dtheta: jax.typing.ArrayLike = 0
-    dphi: jax.typing.ArrayLike = 0
-    time: jax.typing.ArrayLike = 0
+    dv: jax.typing.ArrayLike = 0.0
+    dtheta: jax.typing.ArrayLike = 0.0
+    dphi: jax.typing.ArrayLike = 0.0
+    time: jax.typing.ArrayLike = 0.0
 
     @classmethod
     def create(cls, state: jax.Array):
@@ -39,12 +40,12 @@ def K(state: MissileState):
     K = 3
     t_max = 60
     result = K * (t_max - state.time) / t_max
-    return jax.lax.select(result < 0, 0, result)
+    return jax.lax.select(result < 0, 0.0, result)
 
 def S(state: MissileState):
     """Cross-Sectional area, unit m^2"""
     S0 = jnp.pi * (0.127 / 2)**2
-    S0 += jnp.linalg.norm([jnp.sin(state.dtheta), jnp.sin(state.dphi)]) * 0.127 * 2.87
+    S0 += jnp.linalg.norm(jnp.array([jnp.sin(state.dtheta), jnp.sin(state.dphi)])) * 0.127 * 2.87
     return S0
 
 def rho(alt):
@@ -59,8 +60,8 @@ def launch(missile_state: MissileState,
            target_id) -> MissileState:
     yaw = jnp.atan2(plane_state.north[target_id] - missile_state.north,
                     plane_state.east[target_id] - missile_state.east)
-    Rxy = jnp.linalg.norm([plane_state.north[target_id] - missile_state.north, 
-                           plane_state.east[target_id] - missile_state.east])
+    Rxy = jnp.linalg.norm(jnp.array([plane_state.north[target_id] - missile_state.north, 
+                                    plane_state.east[target_id] - missile_state.east]))
     pitch = jnp.atan2(Rxy, plane_state.altitude[target_id] - missile_state.altitude)
     # init status
     missile_state = missile_state.replace(pitch=pitch,
@@ -101,8 +102,8 @@ def guidance(missile_state: MissileState,
     dx_t = plane_state.vel_x[target_id]
     dy_t = plane_state.vel_y[target_id]
     dz_t = plane_state.vel_z[target_id]
-    Rxy = jnp.linalg.norm([x_m - x_t, y_m - y_t])  # distance from missile to target project to X-Y plane
-    Rxyz = jnp.linalg.norm([x_m - x_t, y_m - y_t, z_t - z_m])  # distance from missile to target
+    Rxy = jnp.linalg.norm(jnp.array([x_m - x_t, y_m - y_t]))  # distance from missile to target project to X-Y plane
+    Rxyz = jnp.linalg.norm(jnp.array([x_m - x_t, y_m - y_t, z_t - z_m]))  # distance from missile to target
     # calculate beta & eps, but no need actually...
     # beta = np.arctan2(y_m - y_t, x_m - x_t)  # relative yaw
     # eps = np.arctan2(z_m - z_t, np.linalg.norm([x_m - x_t, y_m - y_t]))  # relative pitch
@@ -111,7 +112,7 @@ def guidance(missile_state: MissileState,
         (x_t - x_m) * (dx_t - dx_m) + (y_t - y_m) * (dy_t - dy_m))) / (Rxyz**2 * Rxy)
     ny = K(missile_state) * v_m / g * jnp.cos(theta_m) * dbeta
     nz = K(missile_state) * v_m / g * deps + jnp.cos(theta_m)
-    return jnp.clip([ny, nz], -nyz_max, nyz_max)
+    return jnp.clip(jnp.array([ny, nz]), -nyz_max, nyz_max)
 
 def state_trans(state, action, dt):
     """
@@ -131,7 +132,7 @@ def state_trans(state, action, dt):
     T = g * Isp(state) * dm
     D = 0.5 * cD * S(state) * rho(altitude) * v**2
     nx = (T - D) / (state.m * g)
-    ny, nz = action
+    ny, nz = action[0], action[1]
 
     dv = g * (nx - jnp.sin(theta))
     dphi = g / v * (ny / jnp.cos(theta))
@@ -155,6 +156,7 @@ def state_trans(state, action, dt):
                           vel_z=vel_z,
                           vt=v,
                           m=m,
+                          dv=dv,
                           dtheta=dtheta,
                           dphi=dphi,
                           )

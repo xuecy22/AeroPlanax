@@ -92,18 +92,18 @@ class MissileStatus(enum.IntEnum):
 @struct.dataclass
 class BaseMissileState:
     # Position
-    north: jax.typing.ArrayLike = 0
-    east: jax.typing.ArrayLike = 0
-    altitude: jax.typing.ArrayLike = 0
+    north: jax.typing.ArrayLike = 0.0
+    east: jax.typing.ArrayLike = 0.0
+    altitude: jax.typing.ArrayLike = 0.0
     # Posture
-    roll: jax.typing.ArrayLike = 0
-    pitch: jax.typing.ArrayLike = 0
-    yaw: jax.typing.ArrayLike = 0
+    roll: jax.typing.ArrayLike = 0.0
+    pitch: jax.typing.ArrayLike = 0.0
+    yaw: jax.typing.ArrayLike = 0.0
     # velocity
-    vel_x: jax.typing.ArrayLike = 0
-    vel_y: jax.typing.ArrayLike = 0
-    vel_z: jax.typing.ArrayLike = 0
-    vt: jax.typing.ArrayLike = 0
+    vel_x: jax.typing.ArrayLike = 0.0
+    vel_y: jax.typing.ArrayLike = 0.0
+    vel_z: jax.typing.ArrayLike = 0.0
+    vt: jax.typing.ArrayLike = 0.0
     status: jax.typing.ArrayLike = MissileStatus.INACTIVE.value
 
     @property
@@ -112,14 +112,14 @@ class BaseMissileState:
         return self.status == MissileStatus.LAUNCHED
 
     @property
-    def is_success(self):
+    def is_hit(self):
         """Missile has hit the target"""
         return self.status == MissileStatus.HIT
 
     @property
-    def is_done(self):
+    def is_miss(self):
         """Missile is already exploded"""
-        return self.status == MissileStatus.HIT or self.status == MissileStatus.MISS
+        return self.status == MissileStatus.MISS
 
     @classmethod
     def create(cls, state: jax.Array):
