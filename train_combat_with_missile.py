@@ -249,6 +249,12 @@ def make_train(config):
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.done)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.action)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.value)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.reward)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.log_prob)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.obs)))
 
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, last_done, hstate, rng = runner_state
@@ -258,6 +264,7 @@ def make_train(config):
             )
             _, _, last_val = network.apply(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze(0)
+            # jax.debug.breakpoint()
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -464,8 +471,8 @@ config = {
     "LR": 3e-4,
     "NUM_ENVS": 1000,
     "NUM_ACTORS": 1,
-    "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 1e9,
+    "NUM_STEPS": 150,
+    "TOTAL_TIMESTEPS": 5e7,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -494,7 +501,7 @@ wandb.init(
     config=config,
     name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
     group=config['GROUP'],
-    notes='origin',
+    notes='hierarchical',
     # dir=config['LOGDIR'],
     reinit=True,
 )

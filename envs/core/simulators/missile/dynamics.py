@@ -29,16 +29,16 @@ class MissileState(BaseMissileState):
         )
 
 def Isp(state: MissileState):
-    Isp = 120
-    t_thrust = 3
-    result = jax.lax.select(state.time < t_thrust, Isp, 0)
+    Isp = 120.0
+    t_thrust = 3.0
+    result = jax.lax.select(state.time < t_thrust, Isp, 0.0)
     return result
 
 def K(state: MissileState):
     """Proportional Guidance Coefficient"""
     # return self._K
-    K = 3
-    t_max = 60
+    K = 3.0
+    t_max = 60.0
     result = K * (t_max - state.time) / t_max
     return jax.lax.select(result < 0, 0.0, result)
 
@@ -58,14 +58,27 @@ def rho(alt):
 def launch(missile_state: MissileState, 
            plane_state: BasePlaneState, 
            target_id) -> MissileState:
-    yaw = jnp.atan2(plane_state.north[target_id] - missile_state.north,
-                    plane_state.east[target_id] - missile_state.east)
-    Rxy = jnp.linalg.norm(jnp.array([plane_state.north[target_id] - missile_state.north, 
-                                    plane_state.east[target_id] - missile_state.east]))
-    pitch = jnp.atan2(Rxy, plane_state.altitude[target_id] - missile_state.altitude)
+    distance = 20000.0
+    north = plane_state.north[target_id] - distance
+    east = plane_state.east[target_id]
+    altitude = plane_state.altitude[target_id]
+    vel_x = plane_state.vel_x[target_id]
+    vel_y = plane_state.vel_y[target_id]
+    vel_z = plane_state.vel_z[target_id]
+    vt = plane_state.vt[target_id]
+    # yaw = jnp.atan2(plane_state.north[target_id] - missile_state.north,
+    #                 plane_state.east[target_id] - missile_state.east)
+    # Rxy = jnp.linalg.norm(jnp.array([plane_state.north[target_id] - missile_state.north, 
+    #                                 plane_state.east[target_id] - missile_state.east]))
+    # pitch = jnp.atan2(Rxy, plane_state.altitude[target_id] - missile_state.altitude)
     # init status
-    missile_state = missile_state.replace(pitch=pitch,
-                                          yaw=yaw,
+    missile_state = missile_state.replace(north=north,
+                                          east=east,
+                                          altitude=altitude,
+                                          vel_x=vel_x,
+                                          vel_y=vel_y,
+                                          vel_z=vel_z,
+                                          vt=vt,
                                           status=0,
                                           target_aircraft=target_id)
     return missile_state
@@ -73,7 +86,7 @@ def launch(missile_state: MissileState,
 def update(missile_state: MissileState, 
            plane_state: BasePlaneState,
            dt: float) -> MissileState:
-    new_state = missile_state.replace(time=missile_state.time + dt)
+    new_state = missile_state.replace(time=(missile_state.time + dt))
     action = guidance(new_state, plane_state)
     new_state = state_trans(new_state, action, dt)
     mask = missile_state.is_alive
@@ -95,7 +108,7 @@ def guidance(missile_state: MissileState,
     dy_m = missile_state.vel_y
     dz_m = missile_state.vel_z
     v_m = missile_state.vt
-    theta_m = jnp.arcsin(dz_m / v_m)
+    theta_m = jnp.arcsin(dz_m / (v_m + 1e-6))
     x_t = plane_state.north[target_id]
     y_t = plane_state.east[target_id]
     z_t = plane_state.altitude[target_id]
@@ -107,9 +120,9 @@ def guidance(missile_state: MissileState,
     # calculate beta & eps, but no need actually...
     # beta = np.arctan2(y_m - y_t, x_m - x_t)  # relative yaw
     # eps = np.arctan2(z_m - z_t, np.linalg.norm([x_m - x_t, y_m - y_t]))  # relative pitch
-    dbeta = ((dy_t - dy_m) * (x_t - x_m) - (dx_t - dx_m) * (y_t - y_m)) / Rxy**2
+    dbeta = ((dy_t - dy_m) * (x_t - x_m) - (dx_t - dx_m) * (y_t - y_m)) / (Rxy**2 + 1e-6)
     deps = ((dz_t - dz_m) * Rxy**2 - (z_t - z_m) * (
-        (x_t - x_m) * (dx_t - dx_m) + (y_t - y_m) * (dy_t - dy_m))) / (Rxyz**2 * Rxy)
+        (x_t - x_m) * (dx_t - dx_m) + (y_t - y_m) * (dy_t - dy_m))) / (Rxyz**2 * Rxy + 1e-6)
     ny = K(missile_state) * v_m / g * jnp.cos(theta_m) * dbeta
     nz = K(missile_state) * v_m / g * deps + jnp.cos(theta_m)
     return jnp.clip(jnp.array([ny, nz]), -nyz_max, nyz_max)
@@ -131,12 +144,12 @@ def state_trans(state, action, dt):
     theta, phi = state.pitch, state.yaw
     T = g * Isp(state) * dm
     D = 0.5 * cD * S(state) * rho(altitude) * v**2
-    nx = (T - D) / (state.m * g)
+    nx = (T - D) / (state.m * g + 1e-6)
     ny, nz = action[0], action[1]
 
     dv = g * (nx - jnp.sin(theta))
-    dphi = g / v * (ny / jnp.cos(theta))
-    dtheta = g / v * (nz - jnp.cos(theta))
+    dphi = g / (v + 1e-6) * (ny / (jnp.cos(theta) + 1e-6))
+    dtheta = g / (v + 1e-6) * (nz - jnp.cos(theta))
 
     v = v + dt * dv
     phi = phi + dt * dphi

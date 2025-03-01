@@ -177,7 +177,7 @@ def nlplant(xu):
     xdot = xdot.at[2].set(U * st - V * (sphi * ct) - W * (cphi * ct))
     xdot = xdot.at[3].set(P + tt * (Q * sphi + R * cphi))
     xdot = xdot.at[4].set(Q * cphi - R * sphi)
-    xdot = xdot.at[5].set((Q * sphi + R * cphi) / ct)
+    xdot = xdot.at[5].set((Q * sphi + R * cphi) / (ct + 1e-6))
 
     Cx = hifi_F16._Cx((el, beta, alpha))
     Cz = hifi_F16._Cz((el, beta, alpha))
@@ -235,35 +235,35 @@ def nlplant(xu):
     # compute Cx_tot, Cz_tot, Cm_tot, Cy_tot, Cn_tot, and Cl_tot
     # (as on NASA report p37-40)
 
-    dXdQ = (cbar / (2 * vt)) * (Cxq + delta_Cxq_lef * dlef)
+    dXdQ = (cbar / (2 * vt + 1e-6)) * (Cxq + delta_Cxq_lef * dlef)
     Cx_tot = Cx + delta_Cx_lef * dlef + dXdQ * Q
-    dZdQ = (cbar / (2 * vt)) * (Czq + delta_Cz_lef * dlef)
+    dZdQ = (cbar / (2 * vt + 1e-6)) * (Czq + delta_Cz_lef * dlef)
     Cz_tot = Cz + delta_Cz_lef * dlef + dZdQ * Q
-    dMdQ = (cbar / (2 * vt)) * (Cmq + delta_Cmq_lef * dlef)
+    dMdQ = (cbar / (2 * vt + 1e-6)) * (Cmq + delta_Cmq_lef * dlef)
     Cm_tot = Cm * eta_el + Cz_tot * (xcgr - xcg) + delta_Cm_lef * dlef + dMdQ * Q + delta_Cm + delta_Cm_ds
     dYdail = delta_Cy_a20 + delta_Cy_a20_lef * dlef
-    dYdR = (B / (2 * vt)) * (Cyr + delta_Cyr_lef * dlef)
-    dYdP = (B / (2 * vt)) * (Cyp + delta_Cyp_lef * dlef)
+    dYdR = (B / (2 * vt + 1e-6)) * (Cyr + delta_Cyr_lef * dlef)
+    dYdP = (B / (2 * vt + 1e-6)) * (Cyp + delta_Cyp_lef * dlef)
     
     Cy_tot = Cy + delta_Cy_lef * dlef + dYdail * dail + delta_Cy_r30 * drud + dYdR * R + dYdP * P
     dNdail = delta_Cn_a20 + delta_Cn_a20_lef * dlef
-    dNdR = (B / (2 * vt)) * (Cnr + delta_Cnr_lef * dlef)
-    dNdP = (B / (2 * vt)) * (Cnp + delta_Cnp_lef * dlef)
+    dNdR = (B / (2 * vt + 1e-6)) * (Cnr + delta_Cnr_lef * dlef)
+    dNdP = (B / (2 * vt + 1e-6)) * (Cnp + delta_Cnp_lef * dlef)
     Cn_tot = Cn + delta_Cn_lef * dlef - Cy_tot * (xcgr - xcg) * (cbar / B) + dNdail * dail + delta_Cn_r30 * drud + dNdR * R + dNdP * P + delta_Cnbeta * beta
     dLdail = delta_Cl_a20 + delta_Cl_a20_lef * dlef
-    dLdR = (B / (2 * vt)) * (Clr + delta_Clr_lef * dlef)
-    dLdP = (B / (2 * vt)) * (Clp + delta_Clp_lef * dlef)
+    dLdR = (B / (2 * vt + 1e-6)) * (Clr + delta_Clr_lef * dlef)
+    dLdP = (B / (2 * vt + 1e-6)) * (Clp + delta_Clp_lef * dlef)
     Cl_tot = Cl + delta_Cl_lef * dlef + dLdail * dail + delta_Cl_r30 * drud + dLdR * R + dLdP * P + delta_Clbeta * beta
     Udot = R * V - Q * W - g * st + qbar * S * Cx_tot / m + T / m
     Vdot = P * W - R * U + g * ct * sphi + qbar * S * Cy_tot / m
     Wdot = Q * U - P * V + g * ct * cphi + qbar * S * Cz_tot / m
-    xdot = xdot.at[6].set((U * Udot + V * Vdot + W * Wdot) / vt)
-    xdot = xdot.at[7].set((U * Wdot - W * Udot) / (U * U + W * W))
-    xdot = xdot.at[8].set((Vdot * vt - V * xdot[6]) / (vt * vt * cb))
+    xdot = xdot.at[6].set((U * Udot + V * Vdot + W * Wdot) / (vt + 1e-6))
+    xdot = xdot.at[7].set((U * Wdot - W * Udot) / (U * U + W * W + 1e-6))
+    xdot = xdot.at[8].set((Vdot * vt - V * xdot[6]) / (vt * vt * cb + 1e-6))
     L_tot = Cl_tot * qbar * S * B
     M_tot = Cm_tot * qbar * S * cbar
     N_tot = Cn_tot * qbar * S * B
-    denom = Jx * Jz - Jxz * Jxz
+    denom = Jx * Jz - Jxz * Jxz + 1e-6
     xdot = xdot.at[9].set((Jz * L_tot + Jxz * N_tot - (Jz * (Jz - Jy) + Jxz * Jxz) * Q * R + Jxz * (Jx - Jy + Jz) * P * Q + Jxz * Q * Heng) / denom)
     xdot = xdot.at[10].set((M_tot + (Jz - Jx) * P * R - Jxz * (P * P - R * R) - R * Heng) / Jy)
     xdot = xdot.at[11].set((Jx * N_tot + Jxz * L_tot + (Jx * (Jx - Jy) + Jxz * Jxz) * P * Q - Jxz * (Jx - Jy + Jz) * Q * R + Jx * Q * Heng) / denom)

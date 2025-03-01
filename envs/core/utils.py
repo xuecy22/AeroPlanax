@@ -98,8 +98,10 @@ def check_shotdown_by_missile(plane_state: BasePlaneState, missile_state: BaseMi
     shotdown = jnp.any(distance < Rc)
     return shotdown
 
-def check_miss(state: BaseMissileState, agent_id, t_max=60):
-    miss = state.time[agent_id] > t_max
+def check_miss(state: BaseMissileState, agent_id, t_max=60.0, v_min=150.0):
+    timeout = state.time[agent_id] > t_max
+    lowspeed = state.vt[agent_id] < v_min
+    miss = timeout | lowspeed
     return miss
 
 def check_hit(plane_state: BasePlaneState, missile_state: BaseMissileState, agent_id, Rc=300):

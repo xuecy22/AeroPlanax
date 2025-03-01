@@ -113,6 +113,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         state = self._generate_formation(key, state, params)
         key, key_vt = jax.random.split(key)
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
+        vel_x = vt
 
         key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
         delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
@@ -125,6 +126,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
 
         state = state.replace(
             plane_state=state.plane_state.replace(
+                vel_x=vel_x,
                 vt=vt,
             ),
             target_heading=target_heading,

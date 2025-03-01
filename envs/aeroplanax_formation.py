@@ -112,9 +112,11 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         state, formation_positions = self._generate_formation(key, state, params)
         key, key_vt = jax.random.split(key)
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
+        vel_x = vt
 
         state = state.replace(
             plane_state=state.plane_state.replace(
+                vel_x=vel_x,
                 vt=vt,
             ),
             formation_positions=formation_positions,
