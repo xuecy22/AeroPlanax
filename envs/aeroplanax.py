@@ -380,6 +380,19 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 log_msg += f"Color=Red"
                 if log_msg is not None:
                     f.write(log_msg + "\n")
+            for i in range(self.num_missiles):
+                npos = state.missile_state.north[i]
+                epos = state.missile_state.east[i]
+                alt = state.missile_state.altitude[i]
+                roll = state.missile_state.roll[i] * 180 / jnp.pi
+                pitch = state.missile_state.pitch[i] * 180 / jnp.pi
+                yaw = state.missile_state.yaw[i] * 180 / jnp.pi
+                lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
+                log_msg = f"{100 + self.num_agents + i},T={lon[0]}|{lat[0]}|{alt[0]}|{roll[0]}|{pitch[0]}|{yaw[0]},"
+                log_msg += f"Name=AIM-9L,"
+                log_msg += f"Color=Blue"
+                if log_msg is not None:
+                    f.write(log_msg + "\n")
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _reset_task(

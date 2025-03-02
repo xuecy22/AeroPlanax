@@ -58,11 +58,12 @@ def rho(alt):
 def launch(missile_state: MissileState, 
            plane_state: BasePlaneState, 
            target_id) -> MissileState:
-    distance = 20000.0
-    north = plane_state.north[target_id] - distance
+    distance = 15000.0
+    north = plane_state.north[target_id] + distance
     east = plane_state.east[target_id]
     altitude = plane_state.altitude[target_id]
-    vel_x = plane_state.vel_x[target_id]
+    yaw = jnp.pi
+    vel_x = -plane_state.vel_x[target_id]
     vel_y = plane_state.vel_y[target_id]
     vel_z = plane_state.vel_z[target_id]
     vt = plane_state.vt[target_id]
@@ -75,6 +76,7 @@ def launch(missile_state: MissileState,
     missile_state = missile_state.replace(north=north,
                                           east=east,
                                           altitude=altitude,
+                                          yaw=yaw,
                                           vel_x=vel_x,
                                           vel_y=vel_y,
                                           vel_z=vel_z,

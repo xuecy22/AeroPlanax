@@ -20,6 +20,7 @@ from .core.simulators import missile, fighterplane
 from .reward_functions import (
     missile_posture_reward_fn,
     event_driven_reward_fn,
+    alive_reward_fn,
 )
 from .termination_conditions import (
     crashed_fn,
@@ -213,7 +214,8 @@ class AeroPlanaxCombatwithMissileEnv(
 
         self.reward_functions = [
             functools.partial(missile_posture_reward_fn, reward_scale=1.0),
-            functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
+            functools.partial(alive_reward_fn, reward_scale=1.0),
+            functools.partial(event_driven_reward_fn, fail_reward=-200.0, success_reward=200.0),
         ]
 
         self.termination_conditions = [

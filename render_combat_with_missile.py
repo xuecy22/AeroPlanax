@@ -135,31 +135,32 @@ def test(config, rng):
     )
     init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
     network_params = network.init(rng, init_hstate, init_x)
-    # if config["ANNEAL_LR"]:
-    #     tx = optax.chain(
-    #         optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-    #         optax.adam(learning_rate=linear_schedule, eps=1e-5),
-    #     )
-    # else:
-    #     tx = optax.chain(
-    #         optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-    #         optax.adam(config["LR"], eps=1e-5),
-    #     )
-    # train_state = TrainState.create(
-    #     apply_fn=network.apply,
-    #     params=network_params,
-    #     tx=tx,
-    # )
-    # state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
-    # ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-    # checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
-    # network_params = checkpoint["params"]
+    if config["ANNEAL_LR"]:
+        tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(learning_rate=linear_schedule, eps=1e-5),
+        )
+    else:
+        tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(config["LR"], eps=1e-5),
+        )
+    train_state = TrainState.create(
+        apply_fn=network.apply,
+        params=network_params,
+        tx=tx,
+    )
+    if "LOADDIR" in config:
+        state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
+        ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+        checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
+        network_params = checkpoint["params"]
 
     # INIT ENV
     rng, _rng = jax.random.split(rng)
     reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
     obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
-    # env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
+    env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
     init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
     # TEST LOOP
@@ -187,7 +188,7 @@ def test(config, rng):
             env.step, in_axes=(0, 0, 0)
         )(rng_step, env_state, 
             unbatchify(action, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]))
-        # env.render(env_state.env_state, env_params, done, './tracks/')
+        env.render(env_state.env_state, env_params, done, './tracks/')
         reward = batchify(reward, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
         transition = Transition(
             last_done, action, value, reward, log_prob, last_obs, info
@@ -205,21 +206,10 @@ def test(config, rng):
         init_hstate,
         _rng,
     )
-    for _ in range(10):
+    for _ in range(20):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
         print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}')
-        # state = test_state[0].env_state
-        # missile_v = jnp.array([state.missile_state.vel_x, state.missile_state.vel_y, state.missile_state.vel_z])
-        # aircraft_v = jnp.array([state.plane_state.vel_x, state.plane_state.vel_y, state.plane_state.vel_z])
-        # v_decrease = -state.missile_state.dv / 340
-        # angle = jnp.sum(missile_v * aircraft_v) / (state.missile_state.vt * state.plane_state.vt + 1e-6)
-        # v_decrease = jax.lax.select(v_decrease < 0, jnp.zeros((1, 1)), v_decrease)
-        # reward = jax.lax.select(angle < 0, angle / (v_decrease + 1), angle * v_decrease)
-        # plane_alive = state.plane_state.is_alive | state.plane_state.is_locked
-        # missile_alive = state.missile_state.is_alive
-        # mask = plane_alive & missile_alive
-        # print(v_decrease)
         
     return {"test_state": test_state, "trajectory": traj_batch}
 
@@ -241,7 +231,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-02-28-02-21/checkpoints/checkpoint_epoch_333" 
+    "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-02-18-17/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)
