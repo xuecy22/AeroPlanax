@@ -47,7 +47,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax/results/2025-02-28-02-21/checkpoints/checkpoint_epoch_333"
+    "LOADDIR": "/home/xcy/AeroPlanax/envs/models/baseline"
 }
 
 
