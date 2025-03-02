@@ -158,8 +158,9 @@ controller_params = checkpoint["params"]
 
 @struct.dataclass
 class CombatwithMissileTaskState(EnvState):
+    hstate: ArrayLike
     @classmethod
-    def create(cls, env_state: EnvState):
+    def create(cls, env_state: EnvState, extra_state: Array):
         return cls(
             plane_state=env_state.plane_state,
             missile_state=env_state.missile_state,
@@ -167,6 +168,7 @@ class CombatwithMissileTaskState(EnvState):
             done=env_state.done,
             success=env_state.success,
             time=env_state.time,
+            hstate=extra_state,
         )
 
 
@@ -180,14 +182,14 @@ class CombatwithMissileTaskParams(EnvParams):
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     max_steps: int = 100
     sim_freq: int = 50
-    agent_interaction_steps: int = 20
+    agent_interaction_steps: int = 50
     max_altitude: float = 6000
     min_altitude: float = 5800
     max_vt: float = 360
     min_vt: float = 300
-    max_heading_increment: float = 3
-    max_altitude_increment: float = 300
-    max_velocities_u_increment: float = 30
+    max_heading_increment: float = 0.3
+    max_altitude_increment: float = 90
+    max_velocities_u_increment: float = 9
     noise_scale: float = 0.0
     team_spacing: float = 15000       
     safe_distance: float = 3000
@@ -230,27 +232,31 @@ class AeroPlanaxCombatwithMissileEnv(
     def _decode_actions(
         self,
         key: chex.PRNGKey,
+        init_state: CombatwithMissileTaskState,
         state: CombatwithMissileTaskState,
         actions: Dict[AgentName, chex.Array]
     ):
         # unpack actions
         actions = jnp.array([actions[i] for i in self.agents])
         actions = jnp.clip(actions, min=-1, max=1)
-        target_altitude = actions[:, 0] * self.max_altitude_increment
-        target_heading = actions[:, 1] * self.max_heading_increment
-        target_vt = actions[:, 2] * self.max_velocities_u_increment
-        last_obs = self._get_controller_obs(state, target_altitude, target_heading, target_vt)
+        delta_altitude = actions[:, 0] * self.max_altitude_increment
+        delta_heading = actions[:, 1] * self.max_heading_increment
+        delta_vt = actions[:, 2] * self.max_velocities_u_increment
+        target_altitude = init_state.plane_state.altitude + delta_altitude
+        target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+        target_vt = init_state.plane_state.vt + delta_vt
+        last_obs = self._get_controller_obs(state.plane_state, target_altitude, target_heading, target_vt)
         last_obs = jnp.transpose(last_obs)
         last_done = jnp.zeros((self.num_agents), dtype=bool)
         ac_in = (
             last_obs[np.newaxis, :],
             last_done[np.newaxis, :],
         )
-        hstate = ScannedRNN.initialize_carry(self.num_agents, config["GRU_HIDDEN_DIM"])
-        hstate, pi, _ = controller.apply(controller_params, hstate, ac_in)
+        hstate, pi, _ = controller.apply(controller_params, state.hstate, ac_in)
+        state = state.replace(hstate=hstate)
         action = pi.sample(seed=key)[0]
         action = jnp.clip(action, min=-1, max=1)
-        return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+        return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(action)
 
     @property
     def default_params(self) -> CombatwithMissileTaskParams:
@@ -264,7 +270,7 @@ class AeroPlanaxCombatwithMissileEnv(
         params: CombatwithMissileTaskParams,
     ) -> CombatwithMissileTaskState:
         state = super()._init_state(key, params)
-        state = CombatwithMissileTaskState.create(state)
+        state = CombatwithMissileTaskState.create(state, init_hstate)
         return state
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -356,7 +362,7 @@ class AeroPlanaxCombatwithMissileEnv(
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_controller_obs(
         self,
-        state: CombatwithMissileTaskState,
+        state: fighterplane.FighterPlaneState,
         target_altitude,
         target_heading,
         target_vt
@@ -382,12 +388,12 @@ class AeroPlanaxCombatwithMissileEnv(
             14. ego_Q                  (unit: rad/s)
             15. ego_R                  (unit: rad/s)
         """
-        altitude = state.plane_state.altitude
-        roll, pitch, yaw = state.plane_state.roll, state.plane_state.pitch, state.plane_state.yaw
-        vt = state.plane_state.vt
-        alpha = state.plane_state.alpha
-        beta = state.plane_state.beta
-        P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
+        altitude = state.altitude
+        roll, pitch, yaw = state.roll, state.pitch, state.yaw
+        vt = state.vt
+        alpha = state.alpha
+        beta = state.beta
+        P, Q, R = state.P, state.Q, state.R
 
         norm_delta_altitude = (altitude - target_altitude) / 1000
         norm_delta_heading = wrap_PI((yaw - target_heading))

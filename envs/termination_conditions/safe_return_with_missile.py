@@ -19,5 +19,5 @@ def safe_return_with_missile_fn(
     # all the enemy-aircrafts has been destroyed while current aircraft is not under attack
     alive = plane_state.is_alive[agent_id] | plane_state.is_locked[agent_id]
     missile_done = missile_state.is_miss[agent_id] | missile_state.is_hit[agent_id]
-    success = alive & missile_done
+    success = jnp.logical_and(alive, missile_done)
     return done, success

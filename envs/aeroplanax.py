@@ -108,18 +108,19 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     def _decode_actions(
         self,
         key: chex.PRNGKey,
+        init_state: TEnvState,
         state: TEnvState,
         actions: Dict[AgentName, chex.Array]
-    ) -> BaseControlState:
+    ) -> Tuple[TEnvState, BaseControlState]:
         # unpack actions
         actions = jnp.array([actions[i] for i in self.agents])
         if self.agent_type == 0:
             if self.action_type == 0:
                 actions = jnp.clip(actions, min=-1, max=1)
-                return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+                return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
             elif self.action_type == 1:
                 actions = jax.vmap(self._decode_discrete_actions)(actions)
-                return jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+                return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
             else:
                 raise NotImplementedError
         elif self.agent_type == 1:
@@ -131,16 +132,16 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     def _decode_discrete_actions(
         self,
         key: chex.PRNGKey,
-        state: TEnvState,
-        action: jnp.ndarray
+        state: BasePlaneState,
+        actions: jnp.ndarray
     ) -> jnp.ndarray:
         """Convert discrete action index into continuous value.
         """
-        norm_act = jnp.zeros_like(action)
-        norm_act = norm_act.at[0].set(action[0] / 30.)
-        norm_act = norm_act.at[1].set(action[1] * 2. / 40. - 1.)
-        norm_act = norm_act.at[2].set(action[2] * 2. / 40. - 1.)
-        norm_act = norm_act.at[3].set(action[3] * 2. / 40. - 1.)
+        norm_act = jnp.zeros_like(actions)
+        norm_act = norm_act.at[0].set(actions[0] / 30.)
+        norm_act = norm_act.at[1].set(actions[1] * 2. / 40. - 1.)
+        norm_act = norm_act.at[2].set(actions[2] * 2. / 40. - 1.)
+        norm_act = norm_act.at[3].set(actions[3] * 2. / 40. - 1.)
         return norm_act
 
     @property
@@ -174,8 +175,6 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         """Performs step transitions in the environment. Resets the environment if done."""
         if params is None:
             params = self.default_params
-
-        actions: BaseControlState = self._decode_actions(key, state, actions)
 
         def update_status(plane_states: BasePlaneState, missile_states: BaseMissileState):
             # 通用状态更新逻辑
@@ -256,12 +255,13 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 plane_states = update_plane_status(plane_states, crashed, false_locked, false_locked)  # 使用 false_locked
             return plane_states, missile_states
 
-        def step_sim_fn(state, _):
-            plane_states, missile_states = state
+        def step_sim_fn(state_st, _):
+            plane_states, missile_states = state_st.plane_state, state_st.missile_state
+            state_st, action = self._decode_actions(key, state, state_st, actions)
             if self.agent_type == 0:
                 next_plane_states = jax.vmap(
                     fighterplane.update, in_axes=(0, 0, None)
-                )(plane_states, actions, 1 / params.sim_freq)
+                )(plane_states, action, 1 / params.sim_freq)
             elif self.agent_type == 1:
                 raise NotImplementedError
             elif self.agent_type == 2:
@@ -273,19 +273,19 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             else:
                 next_missile_states = missile_states
             next_plane_states, next_missile_states = update_status(next_plane_states, next_missile_states)
-            next_states = (next_plane_states, next_missile_states)
-            return next_states, True
+            state_st = state_st.replace(
+                plane_state=next_plane_states,
+                missile_state=next_missile_states,
+            )
+            return state_st, True
 
-        new_state, _ = jax.lax.scan(
+        state_st, _ = jax.lax.scan(
             step_sim_fn,
-            init=(state.plane_state, state.missile_state),
+            init=state,
             xs=None,
             length=self.agent_interaction_steps,
         )
-        new_plane_state, new_missile_state = new_state
-        state_st = state.replace(
-            plane_state=new_plane_state,
-            missile_state=new_missile_state,
+        state_st = state_st.replace(
             time=state.time + 1
         )
         state_st = self._step_task(key, state_st, actions, params)
