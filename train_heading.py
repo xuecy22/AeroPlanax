@@ -428,12 +428,12 @@ def make_train(config):
                         writer.add_scalar('loss/{}'.format(k), v, env_steps)
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
-                    writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
-                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f}".format(
+                    writer.add_scalar('eval/success_times', metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(), env_steps)
+                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessTimes={:.3f}".format(
                         metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
-                        metric["success"][metric["returned_episode"]].mean(),
+                        metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1    
@@ -494,7 +494,7 @@ wandb.init(
     config=config,
     name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
     group=config['GROUP'],
-    notes='multi target',
+    notes='multi tasks',
     # dir=config['LOGDIR'],
     reinit=True,
 )

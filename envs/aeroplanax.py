@@ -288,7 +288,6 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         state_st = state_st.replace(
             time=state.time + 1
         )
-        state_st = self._step_task(key, state_st, actions, params)
 
         obs_st = self._get_obs(state_st, params)
 
@@ -296,6 +295,9 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         dones["__all__"] = state_st.done
         rewards = self.get_reward(state_st, params)
         info = {"success": state_st.success}
+
+        key, key_step = jax.random.split(key)
+        state_st, info = self._step_task(key_step, state_st, info, actions, params)
 
         # Auto-reset environment based on termination
         key, key_reset = jax.random.split(key)
@@ -409,9 +411,10 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self,
         key: chex.PRNGKey,
         state: TEnvState,
+        info: Dict[str, Any],
         action: Dict[str, chex.Array],
         params: TEnvParams,
-    ) -> TEnvState:
+    ) -> Tuple[TEnvState, Dict[str, Any]]:
         """Task-specific step transition."""
         raise NotImplementedError
 

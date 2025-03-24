@@ -124,13 +124,13 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         return state
 
     @functools.partial(jax.jit, static_argnums=(0,))
-    def _step_task(self, key, state, action, params):
+    def _step_task(self, key, state, info, action, params):
         delta_time = 1.0 / params.sim_freq * params.agent_interaction_steps
         delta_distance = jnp.mean(state.plane_state.vt) * delta_time
         state = state.replace(
             formation_positions=state.formation_positions.at[:, 0].set(state.formation_positions[:, 0] + delta_distance)
         )
-        return state
+        return state, info
 
     # 获取观测值
     @functools.partial(jax.jit, static_argnums=(0,))

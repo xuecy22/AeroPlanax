@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -117,10 +117,10 @@ def test(config, rng):
         )
         return config["LR"] * frac
     # init env
-    # env_params = HeadingTaskParams()
-    # env = AeroPlanaxHeadingEnv(env_params)
-    env_params = CombatwithMissileTaskParams()
-    env = AeroPlanaxCombatwithMissileEnv(env_params)
+    env_params = HeadingTaskParams()
+    env = AeroPlanaxHeadingEnv(env_params)
+    # env_params = CombatwithMissileTaskParams()
+    # env = AeroPlanaxCombatwithMissileEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
 
@@ -206,10 +206,11 @@ def test(config, rng):
         init_hstate,
         _rng,
     )
-    for _ in range(20):
+    for _ in range(3000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
-        print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}')
+        success_times = traj_batch.info['heading_turn_counts']
+        print(f'Time: {env_state.time}, Done: {test_state[2]}, Success Times: {success_times}, Reward: {traj_batch.reward}')
         
     return {"test_state": test_state, "trajectory": traj_batch}
 
@@ -231,7 +232,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-03-00-55/checkpoints/checkpoint_epoch_1000" 
+    "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-24-03-08/checkpoints/checkpoint_epoch_333" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

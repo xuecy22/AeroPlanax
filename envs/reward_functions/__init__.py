@@ -3,3 +3,4 @@ from .event_driven_reward import event_driven_reward_fn
 from .formation_reward import formation_reward_fn
 from .missile_posture_reward import missile_posture_reward_fn
 from .alive_reward import alive_reward_fn
+from .altitude_reward import altitude_reward_fn

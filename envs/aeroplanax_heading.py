@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Any
 from jax import Array
 from jax.typing import ArrayLike
 import chex
@@ -12,10 +12,12 @@ from gymnax.environments import spaces
 from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
 from .reward_functions import (
     heading_reward_fn,
+    altitude_reward_fn,
     event_driven_reward_fn,
 )
 from .termination_conditions import (
     crashed_fn,
+    timeout_fn,
     unreach_heading_fn,
 )
 
@@ -27,6 +29,8 @@ class HeadingTaskState(EnvState):
     target_heading: ArrayLike 
     target_altitude: ArrayLike
     target_vt: ArrayLike
+    last_check_time: ArrayLike
+    heading_turn_counts: ArrayLike
 
     @classmethod
     def create(cls, env_state: EnvState, extra_state: Array):
@@ -40,6 +44,8 @@ class HeadingTaskState(EnvState):
             target_heading=extra_state[0],
             target_altitude=extra_state[1],
             target_vt=extra_state[2],
+            last_check_time=env_state.time,
+            heading_turn_counts=0,
         )
 
 
@@ -50,6 +56,8 @@ class HeadingTaskParams(EnvParams):
     num_missiles: int = 0
     agent_type: int = 0
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
+    sim_freq: int = 50
+    agent_interaction_steps: int = 1
     max_altitude: float = 9000
     min_altitude: float = 4200
     max_vt: float = 360
@@ -57,6 +65,8 @@ class HeadingTaskParams(EnvParams):
     max_heading_increment: float = jnp.pi
     max_altitude_increment: float = 2100
     max_velocities_u_increment: float = 30
+    safe_altitude: float = 4.0
+    danger_altitude: float = 3.5
     noise_scale: float = 0.0
     team_spacing: float = 15000       
     safe_distance: float = 3000
@@ -76,11 +86,13 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
 
         self.reward_functions = [
             functools.partial(heading_reward_fn, reward_scale=1.0),
+            # functools.partial(altitude_reward_fn, reward_scale=1.0, Kv=0.2),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
 
         self.termination_conditions = [
             crashed_fn,
+            timeout_fn,
             unreach_heading_fn,
         ]
 
@@ -139,12 +151,39 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     def _step_task(
         self,
         key: chex.PRNGKey,
-        state: HeadingTaskState, 
+        state: HeadingTaskState,
+        info: Dict[str, Any],
         action: Dict[AgentName, chex.Array],
         params: HeadingTaskParams,
-    ) -> HeadingTaskState:
+    ) -> Tuple[HeadingTaskState, Dict[str, Any]]:
         """Task-specific step transition."""
-        return state
+        # TODO: only fit single agent
+        key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
+        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
+        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=jnp.pi / 2, maxval=jnp.pi / 2)
+        delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=0, maxval=0)
+        delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=0, maxval=0)
+
+        target_altitude = state.plane_state.altitude + delta_altitude
+        target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
+        target_vt = state.plane_state.vt + delta_vt
+
+        new_state = state.replace(
+            plane_state=state.plane_state.replace(
+                status=jnp.where(state.plane_state.is_success, 0, state.plane_state.status)
+            ),
+            success=False,
+            target_heading=target_heading,
+            target_altitude=target_altitude,
+            target_vt=target_vt,
+            last_check_time=state.time,
+            heading_turn_counts=(state.heading_turn_counts + 1),
+        )
+        state = jax.lax.cond(state.success, lambda: new_state, lambda: state)
+        info["heading_turn_counts"] = state.heading_turn_counts
+        return state, info
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_obs(

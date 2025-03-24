@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Any
 from jax import Array
 from jax.typing import ArrayLike
 import chex
@@ -131,11 +131,12 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         self,
         key: chex.PRNGKey,
         state: CombatTaskState,
+        info: Dict[str, Any],
         action: Dict[AgentName, chex.Array],
         params: CombatTaskParams,
-    ) -> CombatTaskState:
+    ) -> Tuple[CombatTaskState, Dict[str, Any]]:
         """Task-specific step transition."""
-        return state
+        return state, info
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_obs(

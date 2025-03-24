@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional, Sequence, Any, Tuple
 from jax import Array
 from jax.typing import ArrayLike
 import chex
@@ -214,8 +214,8 @@ class AeroPlanaxCombatwithMissileEnv(
 
         self.reward_functions = [
             functools.partial(missile_posture_reward_fn, reward_scale=1.0),
-            functools.partial(alive_reward_fn, reward_scale=1.0),
-            functools.partial(event_driven_reward_fn, fail_reward=-200.0, success_reward=200.0),
+            # functools.partial(alive_reward_fn, reward_scale=1.0),
+            # functools.partial(event_driven_reward_fn, fail_reward=-200.0, success_reward=200.0),
         ]
 
         self.termination_conditions = [
@@ -304,12 +304,13 @@ class AeroPlanaxCombatwithMissileEnv(
     def _step_task(
         self,
         key: chex.PRNGKey,
-        state: CombatwithMissileTaskState, 
+        state: CombatwithMissileTaskState,
+        info: Dict[str, Any], 
         action: Dict[AgentName, chex.Array],
         params: CombatwithMissileTaskParams,
-    ) -> CombatwithMissileTaskState:
+    ) -> Tuple[CombatwithMissileTaskState, Dict[str, Any]]:
         """Task-specific step transition."""
-        return state
+        return state, info
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_obs(
