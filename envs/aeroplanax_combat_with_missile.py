@@ -151,10 +151,10 @@ train_state = TrainState.create(
     params=controller_params,
     tx=tx,
 )
-state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
-ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
-controller_params = checkpoint["params"]
+# state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
+# ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+# checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
+# controller_params = checkpoint["params"]
 
 
 @struct.dataclass

@@ -56,11 +56,16 @@ class FormationTaskParams(EnvParams):
     noise_scale: float = 0.0
     team_spacing: float = 15000       
     safe_distance: float = 3000
+    unit_features: int = 4
+    own_features: int = 6
 
 class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskParams]):
     def __init__(self, env_params: Optional[FormationTaskParams] = None):
         super().__init__(env_params)
         self.formation_type = env_params.formation_type
+        self.unit_features = env_params.unit_features
+        self.own_features = env_params.own_features
+        self.obs_size = (self.num_agents-1) * self.unit_features + self.own_features
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
             agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
@@ -70,7 +75,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         }
 
         self.reward_functions = [
-            functools.partial(formation_reward_fn, reward_scale=1.0),
+            functools.partial(formation_reward_fn, reward_scale=1.0, valid_distance=1000.0),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
 
@@ -84,7 +89,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         ]
 
     def _get_obs_size(self) -> int:
-        return 16
+        return self.obs_size
 
     @property
     def default_params(self) -> FormationTaskParams:
@@ -132,6 +137,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         )
         return state
 
+    
     # 获取观测值
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_obs(
@@ -142,57 +148,99 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         """
         Task-specific observation function to state.
 
-        observation(dim 16):
-            0. ego_delta_altitude      (unit: km)
-            1. ego_delta_heading       (unit rad)
-            2. ego_delta_vt            (unit: mh)
-            3. ego_altitude            (unit: 5km)
-            4. ego_roll_sin
-            5. ego_roll_cos
-            6. ego_pitch_sin
-            7. ego_pitch_cos
-            8. ego_vt                  (unit: mh)
-            9. ego_alpha_sin
-            10. ego_alpha_cos
-            11. ego_beta_sin
-            12. ego_beta_cos
-            13. ego_P                  (unit: rad/s)
-            14. ego_Q                  (unit: rad/s)
-            15. ego_R                  (unit: rad/s)
+        - (N-1) * team observation
+            - [0] norm_delta_vt         (unit: mh)
+            - [1] norm_delta_altitude   (unit: km)
+            - [2] norm_AO               (unit: rad) [0, pi]
+            - [3] norm_distance         (unit: 10km)
+        - ego observation(dim 6):
+            - [0]. norm_altitude      (unit: 5km)
+            - [1]. roll_sin      
+            - [2]. roll_cos      
+            - [3]. pitch_sin     
+            - [4]. pitch_cos     
+            - [5]. norm_vt            (unit: mh)
         """
-        # 从状态中提取变量
-        north = state.plane_state.north
-        east = state.plane_state.east
-        altitude = state.plane_state.altitude
-        roll, pitch, yaw = state.plane_state.roll, state.plane_state.pitch, state.plane_state.yaw
-        vt = state.plane_state.vt
-        alpha = state.plane_state.alpha
-        beta = state.plane_state.beta
-        P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
+        
+        def _observe_features(state: FormationTaskState, i: int, j_idx: int):
+            """Get features of unit j as seen from unit i"""
+            cur_pos = jnp.hstack((state.plane_state.north[i], state.plane_state.east[i], state.plane_state.altitude[i]))
+            enemy_pos = jnp.hstack((state.plane_state.north[j_idx], state.plane_state.east[j_idx], state.plane_state.altitude[j_idx]))
+            relative_vector = cur_pos - enemy_pos
+            
+            # 计算敌机的朝向向量
+            st = jnp.sin(state.plane_state.pitch[j_idx])
+            ct = jnp.cos(state.plane_state.pitch[j_idx])
+            spsi = jnp.sin(state.plane_state.yaw[j_idx])
+            cpsi = jnp.cos(state.plane_state.yaw[j_idx])
+            heading_vector = jnp.hstack((ct * cpsi, ct * spsi, st))
+            
+            # 计算相对向量和敌机朝向向量的点积
+            dot_product = jnp.sum(relative_vector * heading_vector)
+            
+            # 计算自机和敌机之间的距离
+            distance = jnp.linalg.norm(relative_vector, axis=0)
+            norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) / 340
+            norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) / 1000
+            norm_AO = dot_product / (distance + 1e-6)  # 防止除以零
+            norm_distance = distance / 10000
+            features = jnp.hstack((norm_delta_vt, norm_delta_altitude, norm_AO, norm_distance))
+            return features
+        
+        def get_features(i, j):
+            """
+            Get features of unit j as seen from unit i
+            经过alive mark, 没有飞机i对飞机i的观测
+            """
+            j = jax.lax.cond(
+                i < self.num_allies,
+                lambda: j,
+                lambda: self.num_agents - j - 1,
+            )
+            offset = jax.lax.cond(i < self.num_allies, lambda: 1, lambda: -1)
+            j_idx = jax.lax.cond(
+                ((j < i) & (i < self.num_allies)) | ((j > i) & (i >= self.num_allies)),
+                lambda: j,
+                lambda: j + offset,
+            )
+            empty_features = jnp.zeros(shape=(self.unit_features,))
+            features = _observe_features(state, i, j_idx)
+            visible = features[-1] < 2
+            return jax.lax.cond(
+                visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j_idx],
+                lambda: features,
+                lambda: empty_features,
+            )
 
-        # 计算归一化的观测值
-        norm_delta_north = (north - state.formation_positions[:, 0]) / 1000
-        norm_delta_east = (east - state.formation_positions[:, 1]) / 1000
-        norm_delta_altitude = (altitude - state.formation_positions[:, 2]) / 1000
+        get_all_features_for_unit = jax.vmap(get_features, in_axes=(None, 0))
+        get_all_features = jax.vmap(get_all_features_for_unit, in_axes=(0, None))
+        other_unit_obs = get_all_features(
+            jnp.arange(self.num_agents), jnp.arange(self.num_agents - 1)
+        )
+        other_unit_obs = other_unit_obs.reshape((self.num_agents, -1))
+        get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
+        own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
+        obs = jnp.concatenate([other_unit_obs, own_unit_obs], axis=-1)
+        return {agent: obs[self.agent_ids[agent]] for agent in self.agents}
+    
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_own_features(self, state: FormationTaskState, i: int):
+        altitude = state.plane_state.altitude[i]
+        roll, pitch = state.plane_state.roll[i], state.plane_state.pitch[i]
+        vt = state.plane_state.vt[i]
         norm_altitude = altitude / 5000
         roll_sin = jnp.sin(roll)
         roll_cos = jnp.cos(roll)
         pitch_sin = jnp.sin(pitch)
         pitch_cos = jnp.cos(pitch)
         norm_vt = vt / 340
-        alpha_sin = jnp.sin(alpha)
-        alpha_cos = jnp.cos(alpha)
-        beta_sin = jnp.sin(beta)
-        beta_cos = jnp.cos(beta)
+        empty_features = jnp.zeros(shape=(self.own_features,))
+        features = jnp.hstack((norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vt))
+        return jax.lax.cond(
+            state.plane_state.is_alive[i], lambda: features, lambda: empty_features
+        )
 
-        # 将观测值堆叠成一个数组
-        obs = jnp.vstack((norm_delta_north, norm_delta_east, norm_delta_altitude,
-                            norm_altitude, norm_vt,
-                            roll_sin, roll_cos, pitch_sin, pitch_cos,
-                            alpha_sin, alpha_cos, beta_sin, beta_cos,
-                            P, Q, R))
-        return {agent: obs[:, i] for i, agent in enumerate(self.agents)}
-    
     @functools.partial(jax.jit, static_argnums=(0, ))
     def _generate_formation(
             self,
