@@ -20,7 +20,9 @@ class FighterPlaneState(BasePlaneState):
     ail: jax.typing.ArrayLike = 0
     rud: jax.typing.ArrayLike = 0
     # acceleration
-    overload: jax.typing.ArrayLike = 0
+    ax: jax.typing.ArrayLike = 0
+    ay: jax.typing.ArrayLike = 0
+    az: jax.typing.ArrayLike = 0
 
     @classmethod
     def create(cls, state: jax.Array):
@@ -44,7 +46,9 @@ class FighterPlaneState(BasePlaneState):
             el=state[16],
             ail=state[17],
             rud=state[18],
-            overload=state[19],
+            ax=state[19],
+            ay=state[20],
+            az=state[21],
         )
 
 
@@ -92,8 +96,8 @@ def accels(roll, pitch, alpha, beta, vt, alpha_dot, beta_dot, vt_dot, P, Q, R):
     u_dot = cosb * cosa * vt_dot - vt * sinb * cosa * beta_dot - vt * cosb * sina * alpha_dot
     v_dot = sinb * vt_dot + vt * cosb * beta_dot
     w_dot = cosb * sina * vt_dot - vt * sinb * sina * beta_dot + vt * cosb * cosa * alpha_dot
-    nx_cg = 1.0 / grav * (u_dot + Q * vel_w - R * vel_v) + jnp.sin(pitch)
-    ny_cg = 1.0 / grav * (v_dot + R * vel_u - P * vel_w) - jnp.cos(pitch) * jnp.sin(roll)
+    nx_cg = -1.0 / grav * (u_dot + Q * vel_w - R * vel_v) - jnp.sin(pitch)
+    ny_cg = -1.0 / grav * (v_dot + R * vel_u - P * vel_w) + jnp.cos(pitch) * jnp.sin(roll)
     nz_cg = -1.0 / grav * (w_dot + P * vel_v - Q * vel_u) + jnp.cos(pitch) * jnp.cos(roll)
     return (nx_cg, ny_cg, nz_cg)
 
@@ -284,7 +288,6 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
     xdot = nlplant(xu)
     nx_cg, ny_cg, nz_cg = accels(xu[3], xu[4], xu[7], xu[8], xu[6], 
                                  xdot[7], xdot[8], xdot[6], xu[9], xu[10], xu[11])
-    overload = jnp.sqrt(nx_cg ** 2 + ny_cg ** 2 + nz_cg ** 2)
     new_x = x + xdot[:12] * dt
     new_state = state.replace(
         north=new_x[0] * 0.3048, east=new_x[1] * 0.3048, altitude=new_x[2] * 0.3048,
@@ -293,7 +296,7 @@ def update(state: FighterPlaneState, action: FighterPlaneControlState, dt: float
         vt=new_x[6] * 0.3048, alpha=new_x[7], beta=new_x[8],
         P=new_x[9], Q=new_x[10], R=new_x[11],
         T=T, el=el, ail=ail, rud=rud,
-        overload=overload
+        ax=nx_cg, ay=ny_cg, az=nz_cg,
     )
     mask = state.is_alive | state.is_locked
     state = jax.lax.cond(mask, lambda: new_state, lambda: state)

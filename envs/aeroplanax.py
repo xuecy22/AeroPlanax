@@ -322,7 +322,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         if self.agent_type == 0:
             aeroplane_state = jax.vmap(
                 fighterplane.FighterPlaneState.create
-            )(jnp.zeros((self.num_agents, 20)))
+            )(jnp.zeros((self.num_agents, 22)))
             aeroplane_control_state = jax.vmap(
                 fighterplane.FighterPlaneControlState.create
             )(jnp.zeros((self.num_agents, 4)))
