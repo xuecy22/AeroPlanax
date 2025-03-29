@@ -14,20 +14,24 @@ class AeroplaneStatus(enum.IntEnum):
 @struct.dataclass
 class BasePlaneState:
     # Position
-    north: jax.typing.ArrayLike = 0
-    east: jax.typing.ArrayLike = 0
-    altitude: jax.typing.ArrayLike = 0
+    north: jax.typing.ArrayLike = 0.0
+    east: jax.typing.ArrayLike = 0.0
+    altitude: jax.typing.ArrayLike = 0.0
     # Posture
-    roll: jax.typing.ArrayLike = 0
-    pitch: jax.typing.ArrayLike = 0
-    yaw: jax.typing.ArrayLike = 0
+    roll: jax.typing.ArrayLike = 0.0
+    pitch: jax.typing.ArrayLike = 0.0
+    yaw: jax.typing.ArrayLike = 0.0
     # velocity
-    vel_x: jax.typing.ArrayLike = 0
-    vel_y: jax.typing.ArrayLike = 0
-    vel_z: jax.typing.ArrayLike = 0
-    vt: jax.typing.ArrayLike = 0
+    vel_x: jax.typing.ArrayLike = 0.0
+    vel_y: jax.typing.ArrayLike = 0.0
+    vel_z: jax.typing.ArrayLike = 0.0
+    vt: jax.typing.ArrayLike = 0.0
     status: jax.typing.ArrayLike = AeroplaneStatus.ALIVE.value
     blood: jax.typing.ArrayLike = 100.0
+    q0: jax.Array = 1.0
+    q1: jax.Array = 0.0
+    q2: jax.Array = 0.0
+    q3: jax.Array = 0.0
 
     @property
     def is_alive(self):

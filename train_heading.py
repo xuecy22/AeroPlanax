@@ -1,6 +1,6 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.5'
 
 import jax
 import wandb
@@ -494,7 +494,7 @@ wandb.init(
     config=config,
     name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
     group=config['GROUP'],
-    notes='multi tasks',
+    notes='multi tasks and new dynamics',
     # dir=config['LOGDIR'],
     reinit=True,
 )

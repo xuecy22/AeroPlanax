@@ -15,7 +15,7 @@ def check_collision(state: BasePlaneState, agent_id, R=50):
     done = jnp.any(distance < R)
     return done
 
-def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-30, max_beta=30):
+def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-5.0, max_beta=5.0):
     alpha = state.alpha[agent_id] * 180 / jnp.pi
     beta = state.beta[agent_id] * 180 / jnp.pi
     mask1 = (alpha < min_alpha) | (alpha > max_alpha)
@@ -38,8 +38,8 @@ def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=750.0):
     done = altitude < altitude_limit
     return done
 
-def check_overload(state: BasePlaneState, agent_id, max_overload=1.0):
-    done = (state.ay[agent_id] > max_overload) | (state.ay[agent_id] < -max_overload)
+def check_overload(state: BasePlaneState, agent_id, max_overload=8.0):
+    done = state.az[agent_id] < -max_overload
     return done
 
 def check_crashed(state: BasePlaneState, agent_id):

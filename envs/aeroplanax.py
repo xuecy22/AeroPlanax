@@ -320,9 +320,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     ) -> TEnvState:
         """Initialize aeroplane state."""
         if self.agent_type == 0:
+            plane_init = jnp.zeros((self.num_agents, 26), dtype=jnp.float32)
+            plane_init = plane_init.at[:, 10].set(1.0)  # q0=1
             aeroplane_state = jax.vmap(
                 fighterplane.FighterPlaneState.create
-            )(jnp.zeros((self.num_agents, 22)))
+            )(plane_init)
             aeroplane_control_state = jax.vmap(
                 fighterplane.FighterPlaneControlState.create
             )(jnp.zeros((self.num_agents, 4)))

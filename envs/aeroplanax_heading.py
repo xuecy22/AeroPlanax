@@ -63,8 +63,8 @@ class HeadingTaskParams(EnvParams):
     max_vt: float = 360
     min_vt: float = 120
     max_heading_increment: float = jnp.pi
-    max_altitude_increment: float = 2100
-    max_velocities_u_increment: float = 30
+    max_altitude_increment: float = 0.0
+    max_velocities_u_increment: float = 0.0
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
     noise_scale: float = 0.0
