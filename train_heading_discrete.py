@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -84,7 +84,7 @@ class ActorCriticRNN(nn.Module):
             self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
         actor_rudder_mean = nn.Dense(
-            self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
         pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
         pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
@@ -245,7 +245,7 @@ def make_train(config):
                 log_prob_throttle = pi_throttle.log_prob(action_throttle)
                 log_prob_elevator = pi_elevator.log_prob(action_elevator)
                 log_prob_aileron = pi_aileron.log_prob(action_aileron)
-                log_prob_rudder = pi_aileron.log_prob(action_rudder)
+                log_prob_rudder = pi_rudder.log_prob(action_rudder)
 
                 log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
 
@@ -496,10 +496,10 @@ config = {
     "GROUP": "heading",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 1000,
+    "NUM_ENVS": 300,
     "NUM_ACTORS": 1,
-    "NUM_STEPS": 1000,
-    "TOTAL_TIMESTEPS": 3e8,
+    "NUM_STEPS": 3000,
+    "TOTAL_TIMESTEPS": 1e8,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,

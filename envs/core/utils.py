@@ -33,7 +33,7 @@ def check_low_speed(state: BasePlaneState, agent_id, min_velocity=0.01):
     done = velocity < min_velocity
     return done
 
-def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=750.0):
+def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=2500.0):
     altitude = state.altitude[agent_id]
     done = altitude < altitude_limit
     return done
