@@ -29,13 +29,13 @@ def unreach_heading_fn(
     # 判断是否到达target_heading
     mask3 = jnp.abs(wrap_PI(yaw - state.target_heading[agent_id])) < jnp.pi / 18
     # 判断是否到达target_altitude
-    mask4 = jnp.abs(altitude - state.target_altitude[agent_id]) < 30
+    # mask4 = jnp.abs(altitude - state.target_altitude[agent_id]) < 30
     # 判断是否到达target_vt
-    mask5 = jnp.abs(vt - state.target_vt[agent_id]) < 6
+    # mask5 = jnp.abs(vt - state.target_vt[agent_id]) < 6
 
     # 当达到目标且时间符合要求时, 任务成功
-    success = mask1 & mask2 & mask3 & mask4 & mask5
-    # success = mask1 & mask2 & mask3
+    # success = mask1 & mask2 & mask3 & mask4 & mask5
+    success = mask1 & mask2 & mask3
     # 任务成功或超时, 则任务结束
     done = jnp.logical_not(mask1)
     return done, success

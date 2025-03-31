@@ -55,9 +55,10 @@ class HeadingTaskParams(EnvParams):
     num_enemies: int = 0
     num_missiles: int = 0
     agent_type: int = 0
+    action_type: int = 1
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     sim_freq: int = 50
-    agent_interaction_steps: int = 1
+    agent_interaction_steps: int = 10
     max_altitude: float = 9000
     min_altitude: float = 4200
     max_vt: float = 360
@@ -86,8 +87,8 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
 
         self.reward_functions = [
             functools.partial(heading_reward_fn, reward_scale=1.0),
-            # functools.partial(altitude_reward_fn, reward_scale=1.0, Kv=0.2),
-            functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
+            functools.partial(altitude_reward_fn, reward_scale=1.0, Kv=0.2),
+            # functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
 
         self.termination_conditions = [

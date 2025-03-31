@@ -131,13 +131,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     @functools.partial(jax.jit, static_argnums=(0,))
     def _decode_discrete_actions(
         self,
-        key: chex.PRNGKey,
-        state: BasePlaneState,
         actions: jnp.ndarray
     ) -> jnp.ndarray:
         """Convert discrete action index into continuous value.
         """
-        norm_act = jnp.zeros_like(actions)
+        norm_act = jnp.zeros_like(actions, dtype=jnp.float32)
         norm_act = norm_act.at[0].set(actions[0] / 30.)
         norm_act = norm_act.at[1].set(actions[1] * 2. / 40. - 1.)
         norm_act = norm_act.at[2].set(actions[2] * 2. / 40. - 1.)
