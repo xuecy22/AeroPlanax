@@ -84,7 +84,7 @@ class ActorCriticRNN(nn.Module):
             self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
         actor_rudder_mean = nn.Dense(
-            self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
         pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
         pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
@@ -245,7 +245,7 @@ def make_train(config):
                 log_prob_throttle = pi_throttle.log_prob(action_throttle)
                 log_prob_elevator = pi_elevator.log_prob(action_elevator)
                 log_prob_aileron = pi_aileron.log_prob(action_aileron)
-                log_prob_rudder = pi_aileron.log_prob(action_rudder)
+                log_prob_rudder = pi_rudder.log_prob(action_rudder)
 
                 log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
 
@@ -327,7 +327,7 @@ def make_train(config):
                             init_hstate.squeeze(0),
                             (traj_batch.obs, traj_batch.done),
                         )
-                        log_prob = pi[0].log_prob(traj_batch.action[:, :, 0])
+                        log_prob  = pi[0].log_prob(traj_batch.action[:, :, 0])
                         log_prob += pi[1].log_prob(traj_batch.action[:, :, 1])
                         log_prob += pi[2].log_prob(traj_batch.action[:, :, 2])
                         log_prob += pi[3].log_prob(traj_batch.action[:, :, 3])
@@ -496,10 +496,10 @@ config = {
     "GROUP": "heading",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 1000,
+    "NUM_ENVS": 3000,
     "NUM_ACTORS": 1,
-    "NUM_STEPS": 1000,
-    "TOTAL_TIMESTEPS": 3e8,
+    "NUM_STEPS": 3000,
+    "TOTAL_TIMESTEPS": 1e9,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
