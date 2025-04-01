@@ -20,6 +20,7 @@ import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
 from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
+from envs.aeroplanax_smaneuver import AeroPlanaxSManEnv, SManEnvParams
 import orbax.checkpoint as ocp
 
 
@@ -123,8 +124,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env_params = HeadingTaskParams()
-    env = AeroPlanaxHeadingEnv(env_params)
+    env_params = SManEnvParams()
+    env = AeroPlanaxSManEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config["NUM_UPDATES"] = (
@@ -175,7 +176,7 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
-        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        network = ActorCriticRNN([66, 84, 75, 86], config=config)
         rng, _rng = jax.random.split(rng)
         init_x = (
             jnp.zeros(
@@ -462,12 +463,12 @@ def make_train(config):
                         writer.add_scalar('loss/{}'.format(k), v, env_steps)
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
-                    writer.add_scalar('eval/success_times', metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(), env_steps)
-                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessTimes={:.3f}".format(
+                    writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
+                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f}".format(
                         metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
-                        metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(),
+                        metric["success"][metric["returned_episode"]].mean(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1    
@@ -493,21 +494,21 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "heading",
+    "GROUP": "smaneuver",
     "SEED": 42,
-    "LR": 3e-4,
-    "NUM_ENVS": 300,
+    "LR": 3e-5,
+    "NUM_ENVS": 2000,
     "NUM_ACTORS": 1,
-    "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 1e8,
-    "FC_DIM_SIZE": 128,
-    "GRU_HIDDEN_DIM": 128,
+    "NUM_STEPS": 1500,
+    "TOTAL_TIMESTEPS": 3e9,
+    "FC_DIM_SIZE": 256,
+    "GRU_HIDDEN_DIM": 256,
     "UPDATE_EPOCHS": 16,
     "NUM_MINIBATCHES": 5,
     "GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
     "CLIP_EPS": 0.2,
-    "ENT_COEF": 1e-3,
+    "ENT_COEF": 0.01, # 增大熵系数鼓励探索
     "VF_COEF": 1,
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",

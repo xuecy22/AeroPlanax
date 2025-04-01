@@ -1,4 +1,4 @@
-import flax.struct
+from flax import struct
 import jax.numpy as jnp
 import jax
 import flax
@@ -9,6 +9,22 @@ from ..lib.attitude import attitude as att
 from ..lib.atmos.ISA import ISA
 from ..lib.gravity.gravityEGM96 import gravityEGM96
 from ..lib.coordinate_transfrom import position_LLA
+from ....base_dataclass import BasePlaneState, BaseControlState
+
+
+@struct.dataclass
+class CanardPlaneControlState(BaseControlState):
+    leading_edge_flap: jax.typing.ArrayLike = 0.0
+
+    @classmethod
+    def create(cls, action: jax.Array):
+        return cls(
+            throttle=action[0],
+            elevator=action[1],
+            aileron=action[2],
+            rudder=action[3],
+            leading_edge_flap=0,
+        )
 
 
 @flax.struct.dataclass
@@ -32,7 +48,7 @@ def createInputChannels(input: jnp.ndarray = jnp.zeros(12)):
     Args:
         state (jnp.array (len(field),), optional): Servo out 对应通道表. Channel value sefaults to 1500us except Throttle to 1000us.
     """
-    input = jax.lax.cond(jnp.any(input), lambda: input, lambda: jnp.ones(12)*1500)
+    input = jax.lax.cond(jnp.any(input), lambda: input, lambda: jnp.ones(12)*1500) # 如果input中存在非零元素（即jnp.any(input)为True），则执行第一个lambda函数，该函数简单地返回input。
     input = jnp.clip(input, 1000, 2000)
     state = InputChannels(
         ElevonLeft=input[0],
@@ -52,7 +68,7 @@ def createInputChannels(input: jnp.ndarray = jnp.zeros(12)):
 
 
 @flax.struct.dataclass
-class Plane:
+class CanardPlaneState(BasePlaneState):
     planeParams: plane_params.CanardPlaneParams
     # Initialize the position of the UAV, set the origin of the NED frame to the initial position
     positionLLA: position_LLA.PositionLLA
@@ -78,7 +94,7 @@ class Plane:
     engine: turbo_engineSW190B.TurboEngineSW190B
 
 def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
-                roll=0, pitch=0, yaw=0,
+                roll=0.0, pitch=0.0, yaw=0.0,
                 velNED=jnp.zeros(3),
                 angVel=jnp.zeros(3),
                 accelNED=jnp.zeros(3),
@@ -138,7 +154,7 @@ def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
     controlSurface = control_surface.createControlSurface(delta=CSD)
     engine = turbo_engineSW190B.createTurboEngineSW190B(controlInputPWM.Throttle,
                                                         pos=jnp.array([-2.53, 0, 0]), azimuth=0, elevation=0)
-    state = Plane(
+    state = CanardPlaneState(
         planeParams=planeParams,
         positionLLA=positionLLA,
         # Initialize attitude RPY
@@ -165,13 +181,8 @@ def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
     state = update_air_data(state, rho, Ts)
     return state
 
-def update(state, deltaT, cmdInput):
-    """_summary_
+def update(state, cmdInput, deltaT):
 
-    Args:
-        deltaT (_type_): _description_
-        cmdInput (_type_): 遥控器输入
-    """
     Ts, rho, Ps = ISA(state.positionLLA.Altitude)
     state = update_air_data(state, rho, Ts)
     gNED = gravityEGM96(state.positionLLA.Altitude, state.positionLLA.Latitude)

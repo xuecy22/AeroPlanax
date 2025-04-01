@@ -1,6 +1,6 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.5'
 
 import jax
 import wandb
@@ -20,6 +20,7 @@ import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
 from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
+from envs.aeroplanax_smaneuver import AeroPlanaxSManEnv, SManEnvParams
 import orbax.checkpoint as ocp
 
 
@@ -74,22 +75,11 @@ class ActorCriticRNN(nn.Module):
             self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
         )(embedding)
         actor_mean = activation(actor_mean)
-        actor_throttle_mean = nn.Dense(
-            self.action_dim[0], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        actor_mean = nn.Dense(
+            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_elevator_mean = nn.Dense(
-            self.action_dim[1], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        actor_aileron_mean = nn.Dense(
-            self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        actor_rudder_mean = nn.Dense(
-            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
-        pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
-        pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
-        pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
+        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
 
         critic = nn.Dense(
             self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
@@ -99,7 +89,7 @@ class ActorCriticRNN(nn.Module):
             critic
         )
 
-        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder), jnp.squeeze(critic, axis=-1)
+        return hidden, pi, jnp.squeeze(critic, axis=-1)
 
 
 class Transition(NamedTuple):
@@ -123,8 +113,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env_params = HeadingTaskParams()
-    env = AeroPlanaxHeadingEnv(env_params)
+    env_params = SManEnvParams()
+    env = AeroPlanaxSManEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config["NUM_UPDATES"] = (
@@ -134,7 +124,7 @@ def make_train(config):
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
     if "LOADDIR" in config:
-        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
         rng = jax.random.PRNGKey(42)
         init_x = (
             jnp.zeros(
@@ -175,7 +165,7 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
-        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
         rng, _rng = jax.random.split(rng)
         init_x = (
             jnp.zeros(
@@ -226,34 +216,14 @@ def make_train(config):
                 train_state, env_state, last_obs, last_done, hstate, rng = runner_state
 
                 # SELECT ACTION
+                rng, _rng = jax.random.split(rng)
                 ac_in = (
                     last_obs[np.newaxis, :],
                     last_done[np.newaxis, :],
                 )
                 hstate, pi, value = network.apply(train_state.params, hstate, ac_in)
-
-                pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
-
-                rng, _rng = jax.random.split(rng)
-                action_throttle = pi_throttle.sample(seed=_rng)
-                rng, _rng = jax.random.split(rng)
-                action_elevator = pi_elevator.sample(seed=_rng)
-                rng, _rng = jax.random.split(rng)
-                action_aileron = pi_aileron.sample(seed=_rng)
-                rng, _rng = jax.random.split(rng)
-                action_rudder = pi_rudder.sample(seed=_rng)
-                log_prob_throttle = pi_throttle.log_prob(action_throttle)
-                log_prob_elevator = pi_elevator.log_prob(action_elevator)
-                log_prob_aileron = pi_aileron.log_prob(action_aileron)
-                log_prob_rudder = pi_rudder.log_prob(action_rudder)
-
-                log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
-
-                action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
-                                          action_elevator[:, :, np.newaxis], 
-                                          action_aileron[:, :, np.newaxis], 
-                                          action_rudder[:, :, np.newaxis]], axis=-1)
-
+                action = pi.sample(seed=_rng)
+                log_prob = pi.log_prob(action)
                 value, action, log_prob = (
                     value.squeeze(0),
                     action.squeeze(0),
@@ -327,10 +297,7 @@ def make_train(config):
                             init_hstate.squeeze(0),
                             (traj_batch.obs, traj_batch.done),
                         )
-                        log_prob  = pi[0].log_prob(traj_batch.action[:, :, 0])
-                        log_prob += pi[1].log_prob(traj_batch.action[:, :, 1])
-                        log_prob += pi[2].log_prob(traj_batch.action[:, :, 2])
-                        log_prob += pi[3].log_prob(traj_batch.action[:, :, 3])
+                        log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
                         value_pred_clipped = traj_batch.value + (
@@ -357,7 +324,7 @@ def make_train(config):
                         )
                         loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
                         loss_actor = loss_actor.mean()
-                        entropy = pi[0].entropy().mean() + pi[1].entropy().mean() + pi[2].entropy().mean() + pi[3].entropy().mean()
+                        entropy = pi.entropy().mean()
 
                         # debug
                         approx_kl = ((ratio - 1) - logratio).mean()
@@ -462,12 +429,12 @@ def make_train(config):
                         writer.add_scalar('loss/{}'.format(k), v, env_steps)
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
-                    writer.add_scalar('eval/success_times', metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(), env_steps)
-                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessTimes={:.3f}".format(
+                    writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
+                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f}".format(
                         metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
-                        metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(),
+                        metric["success"][metric["returned_episode"]].mean(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1    
@@ -493,21 +460,21 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "heading",
+    "GROUP": "smaneuve(quaternion version)",
     "SEED": 42,
-    "LR": 3e-4,
-    "NUM_ENVS": 300,
+    "LR": 3e-5,
+    "NUM_ENVS": 2000,
     "NUM_ACTORS": 1,
-    "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 1e8,
-    "FC_DIM_SIZE": 128,
-    "GRU_HIDDEN_DIM": 128,
+    "NUM_STEPS": 1500,
+    "TOTAL_TIMESTEPS": 3e9,
+    "FC_DIM_SIZE": 256,
+    "GRU_HIDDEN_DIM": 256,
     "UPDATE_EPOCHS": 16,
     "NUM_MINIBATCHES": 5,
     "GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
     "CLIP_EPS": 0.2,
-    "ENT_COEF": 1e-3,
+    "ENT_COEF": 0.01, # 增大熵系数鼓励探索
     "VF_COEF": 1,
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
@@ -528,7 +495,7 @@ wandb.init(
     config=config,
     name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
     group=config['GROUP'],
-    notes='multi tasks and discrete action',
+    notes='multi target',
     # dir=config['LOGDIR'],
     reinit=True,
 )

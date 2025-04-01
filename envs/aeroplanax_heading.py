@@ -59,13 +59,13 @@ class HeadingTaskParams(EnvParams):
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     sim_freq: int = 50
     agent_interaction_steps: int = 10
-    max_altitude: float = 9000
-    min_altitude: float = 4200
-    max_vt: float = 360
-    min_vt: float = 120
+    max_altitude: float = 9000.0
+    min_altitude: float = 4200.0
+    max_vt: float = 360.0
+    min_vt: float = 120.0
     max_heading_increment: float = jnp.pi
-    max_altitude_increment: float = 0.0
-    max_velocities_u_increment: float = 0.0
+    max_altitude_increment: float = 2100.0
+    max_velocities_u_increment: float = 100.0
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
     noise_scale: float = 0.0
@@ -96,6 +96,8 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
             timeout_fn,
             unreach_heading_fn,
         ]
+
+        self.increment_size = jnp.array([0.2, 0.4, 0.6, 0.8, 1.0] + [1.0] * 10)
 
     def _get_obs_size(self) -> int:
         return 16
@@ -128,23 +130,23 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
         vel_x = vt
 
-        key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
-        delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
-        delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+        # key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
+        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
+        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
 
-        target_altitude = state.plane_state.altitude + delta_altitude
-        target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
-        target_vt = vt + delta_vt
+        # target_altitude = state.plane_state.altitude + delta_altitude
+        # target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
+        # target_vt = vt + delta_vt
 
         state = state.replace(
             plane_state=state.plane_state.replace(
                 vel_x=vel_x,
                 vt=vt,
             ),
-            target_heading=target_heading,
-            target_altitude=target_altitude,
-            target_vt=target_vt,
+            target_heading=state.plane_state.yaw,
+            target_altitude=state.plane_state.altitude,
+            target_vt=vt,
         )
         return state
 
@@ -160,16 +162,17 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         """Task-specific step transition."""
         # TODO: only fit single agent
         key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
-        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
-        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
-        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=jnp.pi / 2, maxval=jnp.pi / 2)
-        delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=0, maxval=0)
-        delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=0, maxval=0)
+        delta = self.increment_size[state.heading_turn_counts]
+        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
+        delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=jnp.pi / 2, maxval=jnp.pi / 2)
+        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=0, maxval=0)
+        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=0, maxval=0)
 
-        target_altitude = state.plane_state.altitude + delta_altitude
-        target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
-        target_vt = state.plane_state.vt + delta_vt
+        target_altitude = state.plane_state.altitude + delta_altitude * delta
+        target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
+        target_vt = state.plane_state.vt + delta_vt * delta
 
         new_state = state.replace(
             plane_state=state.plane_state.replace(

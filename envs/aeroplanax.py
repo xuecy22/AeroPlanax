@@ -31,8 +31,8 @@ class EnvParams(environment.EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
     num_missiles: int = 0
-    agent_type: int = 0  # 0: fighterplane, 1: canardplane, 2: uav  TODO: heterogeneous agents
-    action_type: int = 0 # 0: continuous, 1: discrete
+    agent_type: int = 1  # 0: fighterplane, 1: canardplane, 2: uav  TODO: heterogeneous agents
+    action_type: int = 1 # 0: continuous, 1: discrete
     max_steps: int = 100
     sim_freq: int = 50
     agent_interaction_steps: int = 1
@@ -100,7 +100,15 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             else:
                 raise NotImplementedError
         elif self.agent_type == 1:
-            raise NotImplementedError
+            if self.action_type == 0:
+                return spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=jnp.float32)
+            elif self.action_type == 1:
+                return spaces.Dict({"throttle": spaces.Discrete(66),
+                                    "elevator": spaces.Discrete(84),
+                                    "aileron": spaces.Discrete(75),
+                                    "rudder": spaces.Discrete(86),})
+            else:
+                raise NotImplementedError
         elif self.agent_type == 2:
             raise NotImplementedError
     
@@ -110,11 +118,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         key: chex.PRNGKey,
         init_state: TEnvState,
         state: TEnvState,
-        actions: Dict[AgentName, chex.Array]
+        actions: Dict[AgentName, chex.Array] # tear
     ) -> Tuple[TEnvState, BaseControlState]:
         # unpack actions
         actions = jnp.array([actions[i] for i in self.agents])
-        if self.agent_type == 0:
+        if self.agent_type == 0: # fighterplane
             if self.action_type == 0:
                 actions = jnp.clip(actions, min=-1, max=1)
                 return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
@@ -123,11 +131,33 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
             else:
                 raise NotImplementedError
-        elif self.agent_type == 1:
-            raise NotImplementedError
+        elif self.agent_type == 1: # canardplane
+            if self.action_type == 0:
+                actions = jnp.clip(actions, min=-1, max=1)
+                return state, jax.vmap(canardplane.CanardPlaneControlState.create)(actions)
+            elif self.action_type == 1:
+                actions = jax.vmap(self._decode_discrete_actions)(actions)
+                return state, jax.vmap(canardplane.CanardPlaneControlState.create)(actions)
+            else:
+                raise NotImplementedError
         elif self.agent_type == 2:
             raise NotImplementedError
     
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def custom_normalize(action, low, high, range_vals, action_space_max):
+        # 当 action <= low 时，采用线性映射到 [range_vals[0], range_vals[1]]
+        # 当 low < action <= high 时，映射到 [range_vals[1], range_vals[2]]
+        # 当 action > high 时，映射到 [range_vals[2], range_vals[3]]
+        return jnp.where(
+            action <= low,
+            (action / low) * (range_vals[1] - range_vals[0]) + range_vals[0],
+            jnp.where(
+                action <= high,
+                ((action - low) / (high - low)) * (range_vals[2] - range_vals[1]) + range_vals[1],
+                ((action - high) / (action_space_max - high - 1)) * (range_vals[3] - range_vals[2]) + range_vals[2]
+            )
+        )
+
     @functools.partial(jax.jit, static_argnums=(0,))
     def _decode_discrete_actions(
         self,
@@ -136,10 +166,25 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         """Convert discrete action index into continuous value.
         """
         norm_act = jnp.zeros_like(actions, dtype=jnp.float32)
-        norm_act = norm_act.at[0].set(actions[0] / 30.)
-        norm_act = norm_act.at[1].set(actions[1] * 2. / 40. - 1.)
-        norm_act = norm_act.at[2].set(actions[2] * 2. / 40. - 1.)
-        norm_act = norm_act.at[3].set(actions[3] * 2. / 40. - 1.)
+        if self.agent_type == 0: # fighterplane
+            norm_act = norm_act.at[0].set(actions[0] / 30.) # throttle
+            norm_act = norm_act.at[1].set(actions[1] * 2. / 40. - 1.) # elevator
+            norm_act = norm_act.at[2].set(actions[2] * 2. / 40. - 1.) # aileron
+            norm_act = norm_act.at[3].set(actions[3] * 2. / 40. - 1.) # rudder
+        elif self.agent_type == 1: # canardplane
+            # 使用 custom_normalize 将离散动作映射到对应的连续控制信号
+            norm_act = norm_act.at[0].set(
+                self.custom_normalize(actions[0], 13, 53, jnp.array([1100, 1370, 1710, 1950]), 66)
+            )  # throttle
+            norm_act = norm_act.at[1].set(
+                self.custom_normalize(actions[1], 12, 52, jnp.array([1100, 1340, 1640, 2000]), 84)
+            )  # elevator
+            norm_act = norm_act.at[2].set(
+                self.custom_normalize(actions[2], 15, 60, jnp.array([1100, 1350, 1620, 1980]), 75)
+            )  # aileron
+            norm_act = norm_act.at[3].set(
+                self.custom_normalize(actions[3], 20, 55, jnp.array([1170, 1530, 1880, 2000]), 86)
+            )  # rudder
         return norm_act
 
     @property
@@ -162,6 +207,17 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         obs = self._get_obs(state, params)
         return obs, state
 
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def custom_decode_discrete_actions(actions):
+        # 组装 13 路伺服通道
+        servo_in = jnp.ones_like(actions) * 1100
+        servo_in = servo_in.at[0].set(actions[2])         # aileron_left
+        servo_in = servo_in.at[5].set(actions[2] + 119)   # aileron_right
+        servo_in = servo_in.at[6].set(actions[1])         # Canard (elevator)
+        servo_in = servo_in.at[2].set(actions[0])         # Throttle
+        servo_in = servo_in.at[1].set(actions[3])         # VtailLeft  (rudder_left)
+        servo_in = servo_in.at[3].set(actions[3] + 16)    # VtailRight (rudder_right)
+        return servo_in
     @functools.partial(jax.jit, static_argnums=(0,))
     def step(
         self,
@@ -257,11 +313,25 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             plane_states, missile_states = state_st.plane_state, state_st.missile_state
             state_st, action = self._decode_actions(key, state, state_st, actions)
             if self.agent_type == 0:
+                """
+                0 的作用:
+                    表示对应参数在 第0轴（最外层维度） 进行并行化。例如：
+                    plane_states 是形状 (N, ...) 的数组（N 个飞行器状态）
+                    action 是形状 (N, ...) 的数组（N 个控制动作）
+                    此时 in_axes=(0, 0) 表示同时遍历这两个参数的第一个维度（即逐元素配对处理）
+                None 的作用:
+                    表示对应参数 不进行批处理，所有并行计算共享同一个值。例如：
+                    1/params.sim_freq 是标量时间步长（如 0.01 秒）
+                    in_axes=(0, 0, None) 要求第三个参数保持原值广播到所有批次
+                """
                 next_plane_states = jax.vmap(
                     fighterplane.update, in_axes=(0, 0, None)
                 )(plane_states, action, 1 / params.sim_freq)
             elif self.agent_type == 1:
-                raise NotImplementedError
+                servo_in = jax.vmap(self.custom_decode_discrete_actions)(action)
+                next_plane_states = jax.vmap(
+                    canardplane.update, in_axes=(0, 0, None)
+                )(plane_states, servo_in, 1 / params.sim_freq)
             elif self.agent_type == 2:
                 raise NotImplementedError
             if self.num_missiles > 0:
@@ -327,7 +397,25 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 fighterplane.FighterPlaneControlState.create
             )(jnp.zeros((self.num_agents, 4)))
         elif self.agent_type == 1:
-            raise NotImplementedError
+            # 创建批量化初始化函数
+            def _batch_create_canard(_dummy):
+                return canardplane.createPlane(
+                    latitude=0.0,  # 初始纬度设为0
+                    longitude=0.0, # 初始经度设为0
+                    altitude=0.0,  # 初始高度设为0
+                    roll=0.0,      # 初始姿态全0
+                    pitch=0.0,
+                    yaw=0.0,
+                    velNED=jnp.zeros(3),  # NED速度初始化为0
+                    angVel=jnp.zeros(3),  # 角速度初始化为0
+                    accelNED=jnp.zeros(3) # 加速度初始化为0
+                )
+
+            # 使用vmap批量生成状态（通过虚拟参数触发批处理）
+            aeroplane_state = jax.vmap(_batch_create_canard)(jnp.arange(self.num_agents))
+            aeroplane_control_state = jax.vmap(
+                canardplane.CanardPlaneControlState.create
+            )(jnp.zeros((self.num_agents, 4)))
         elif self.agent_type == 2:
             raise NotImplementedError
         if self.num_missiles > 0:
