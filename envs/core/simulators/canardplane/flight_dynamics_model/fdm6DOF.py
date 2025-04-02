@@ -48,8 +48,11 @@ def createFDM6DOF(state0: MotionState = None, airframe: plane_params.CanardPlane
     Args:
         state0 (np.array (16,)): 无人机动力学状态量
     """
-    state0 = jax.lax.cond(state0 is None, lambda: createMotionState(), lambda: state0)
-    airframe = jax.lax.cond(airframe is None, lambda: plane_params.createPlaneParams(), lambda: airframe)
+    # 普通Python判断
+    if state0 is None:
+        state0 = createMotionState()
+    if airframe is None:
+        airframe = plane_params.createPlaneParams()
     # Simulation physics time, unit in seconds
     # self.tSim = 0 if Ts is None else Ts
     motionstate = jnp.hstack((

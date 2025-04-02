@@ -10,6 +10,7 @@ from ..lib.atmos.ISA import ISA
 from ..lib.gravity.gravityEGM96 import gravityEGM96
 from ..lib.coordinate_transfrom import position_LLA
 from ....base_dataclass import BasePlaneState, BaseControlState
+from . import plane_params
 
 
 @struct.dataclass
@@ -66,32 +67,69 @@ def createInputChannels(input: jnp.ndarray = jnp.zeros(12)):
     )
     return state
 
+def createPositionLLA_safely(lat=0.0, lon=0.0, alt=0.0,
+                             latOrigin=0.0, lonOrigin=0.0, altOrigin=0.0):
+    """
+    用一个“占位”的 PositionLLA 实例 dummy 来调用它的 .createPositionLLA()，
+    这样就不用修改 position_LLA.py
+    """
+    # 先创建一个空的 dummy（填上符合该 dataclass 要求的字段值）
+    dummy = position_LLA.PositionLLA(
+        Latitude=0.0,
+        Longitude=0.0,
+        Altitude=0.0,
+        x=0.0,
+        y=0.0,
+        z=0.0,
+        OriginLatitude=0.0,
+        OriginLongitude=0.0,
+        OriginAltitude=0.0
+    )
+    # 再用这个 dummy 调 createPositionLLA(...)，让它有 self 参数
+    return dummy.createPositionLLA(
+        lat=lat,
+        lon=lon,
+        alt=alt,
+        latOrigin=latOrigin,
+        lonOrigin=lonOrigin,
+        altOrigin=altOrigin
+    )
 
 @flax.struct.dataclass
 class CanardPlaneState(BasePlaneState):
-    planeParams: plane_params.CanardPlaneParams
+    planeParams: plane_params.CanardPlaneParams = plane_params.createPlaneParams()  # 添加默认值
     # Initialize the position of the UAV, set the origin of the NED frame to the initial position
-    positionLLA: position_LLA.PositionLLA
+    positionLLA: position_LLA.PositionLLA = position_LLA.createPositionLLA(
+        lat=0.0,
+        lon=0.0,
+        alt=0.0
+    )
     # Initialize attitude RPY
-    roll: float
-    pitch: float
-    yaw: float
-    dynamics: fdm6DOF.FDM6DOF
+    roll: float = 0.0
+    pitch: float = 0.0
+    yaw: float = 0.0
+    dynamics: fdm6DOF.FDM6DOF = fdm6DOF.createFDM6DOF()
     # Initialize airdata
-    Wind: wind_sim.windSim
-    VwindBody: jnp.ndarray
-    VaBody: jnp.ndarray
-    alpha: float
-    beta: float
-    VTAS: float
-    VIAS: float
-    mach: float
-    dynamicPressure: float
-    alphadot: float
-    betadot: float
-    controlInputPWM: InputChannels
-    controlSurface: control_surface.ControlSurface
-    engine: turbo_engineSW190B.TurboEngineSW190B
+    Wind: wind_sim.windSim = wind_sim.createwindSim(
+        jnp.array([200, 200, 50]),
+        jnp.array([1.06, 1.06, 0.7]),
+        jnp.array([0.0, 0.0, 0.0])
+    )
+    VwindBody: jnp.ndarray = jnp.zeros(3)
+    VaBody: jnp.ndarray = jnp.zeros(3)
+    alpha: float = 0.0
+    beta: float = 0.0
+    VTAS: float = 0.0
+    VIAS: float = 0.0
+    mach: float = 0.0
+    dynamicPressure: float = 0.0
+    alphadot: float = 0.0
+    betadot: float = 0.0
+    controlInputPWM: InputChannels = createInputChannels(
+        jnp.zeros(12)
+    )
+    controlSurface: control_surface.ControlSurface = control_surface.createControlSurface()
+    engine: turbo_engineSW190B.TurboEngineSW190B = turbo_engineSW190B.createTurboEngineSW190B()
 
 def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
                 roll=0.0, pitch=0.0, yaw=0.0,

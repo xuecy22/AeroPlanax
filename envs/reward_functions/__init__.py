@@ -4,3 +4,4 @@ from .formation_reward import formation_reward_fn
 from .missile_posture_reward import missile_posture_reward_fn
 from .alive_reward import alive_reward_fn
 from .altitude_reward import altitude_reward_fn
+from .s_maneuver_reward import s_maneuver_reward_fn

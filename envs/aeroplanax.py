@@ -144,7 +144,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             raise NotImplementedError
     
     @functools.partial(jax.jit, static_argnums=(0,))
-    def custom_normalize(action, low, high, range_vals, action_space_max):
+    def custom_normalize(self, action, low, high, range_vals, action_space_max):
         # 当 action <= low 时，采用线性映射到 [range_vals[0], range_vals[1]]
         # 当 low < action <= high 时，映射到 [range_vals[1], range_vals[2]]
         # 当 action > high 时，映射到 [range_vals[2], range_vals[3]]
@@ -208,9 +208,9 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         return obs, state
 
     @functools.partial(jax.jit, static_argnums=(0,))
-    def custom_decode_discrete_actions(actions):
+    def custom_decode_discrete_actions(self, actions):
         # 组装 13 路伺服通道
-        servo_in = jnp.ones_like(actions) * 1100
+        servo_in = jnp.full((12,), 1100, dtype=jnp.float32)
         servo_in = servo_in.at[0].set(actions[2])         # aileron_left
         servo_in = servo_in.at[5].set(actions[2] + 119)   # aileron_right
         servo_in = servo_in.at[6].set(actions[1])         # Canard (elevator)

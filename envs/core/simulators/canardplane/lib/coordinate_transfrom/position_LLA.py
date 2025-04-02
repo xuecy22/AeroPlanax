@@ -19,7 +19,7 @@ class PositionLLA:
     # LLA: Latitude(deg), Longitude(deg), Altitude(deg)
 
 
-def createPositionLLA(self, lat=30.0, lon=118.0, alt=0.0, latOrigin=0.0, lonOrigin=0.0, altOrigin=0.0):
+def createPositionLLA(lat=30.0, lon=118.0, alt=0.0, latOrigin=0.0, lonOrigin=0.0, altOrigin=0.0):
     Latitude = lat
     Longitude = lon
     Altitude = alt
