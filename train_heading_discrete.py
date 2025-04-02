@@ -1,6 +1,6 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.5'
 
 import jax
 import wandb
@@ -496,7 +496,7 @@ config = {
     "GROUP": "heading",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 300,
+    "NUM_ENVS": 30,
     "NUM_ACTORS": 1,
     "NUM_STEPS": 3000,
     "TOTAL_TIMESTEPS": 1e8,

@@ -15,12 +15,17 @@ def check_collision(state: BasePlaneState, agent_id, R=50):
     done = jnp.any(distance < R)
     return done
 
-def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-5.0, max_beta=5.0):
-    alpha = state.alpha[agent_id] * 180 / jnp.pi
-    beta = state.beta[agent_id] * 180 / jnp.pi
-    mask1 = (alpha < min_alpha) | (alpha > max_alpha)
-    mask2 = (beta < min_beta) | (beta > max_beta)
-    done = mask1 | mask2
+# def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-5.0, max_beta=5.0):
+#     alpha = state.alpha[agent_id] * 180 / jnp.pi
+#     beta = state.beta[agent_id] * 180 / jnp.pi
+#     mask1 = (alpha < min_alpha) | (alpha > max_alpha)
+#     mask2 = (beta < min_beta) | (beta > max_beta)
+#     done = mask1 | mask2
+#     return done
+
+def check_extreme_state(state: BasePlaneState, agent_id, rotation_limit=1000.0):
+    P, Q, R = state.P[agent_id], state.Q[agent_id], state.R[agent_id]
+    done = jnp.sqrt(P**2 + Q**2 + R**2) > rotation_limit
     return done
 
 def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3):
@@ -33,13 +38,22 @@ def check_low_speed(state: BasePlaneState, agent_id, min_velocity=0.01):
     done = velocity < min_velocity
     return done
 
+def check_high_altitude(state: BasePlaneState, agent_id, altitude_limit=1e9):
+    altitude = state.altitude[agent_id]
+    done = altitude > altitude_limit
+    return done
+
 def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=2500.0):
     altitude = state.altitude[agent_id]
     done = altitude < altitude_limit
     return done
 
-def check_overload(state: BasePlaneState, agent_id, max_overload=8.0):
-    done = state.az[agent_id] < -max_overload
+def check_overload(state: BasePlaneState, agent_id, max_overload=10.0):
+    # done = state.az[agent_id] < -max_overload
+    mask1 = jnp.abs(state.ax[agent_id]) >= max_overload
+    mask2 = jnp.abs(state.ay[agent_id]) >= max_overload
+    mask3 = jnp.abs(state.az[agent_id]) >= max_overload
+    done = mask1 | mask2 | mask3
     return done
 
 def check_crashed(state: BasePlaneState, agent_id):
@@ -49,7 +63,8 @@ def check_crashed(state: BasePlaneState, agent_id):
     mask4 = check_low_speed(state, agent_id)
     mask5 = check_low_altitude(state, agent_id)
     mask6 = check_overload(state, agent_id)
-    crashed = mask1 | mask2 | mask3 | mask4 | mask5 | mask6
+    mask7 = check_high_altitude(state, agent_id)
+    crashed = mask1 | mask2 | mask3 | mask4 | mask5 | mask6 | mask7
     return crashed
 
 def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp.pi/3):
