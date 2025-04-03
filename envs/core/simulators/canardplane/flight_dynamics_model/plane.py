@@ -111,12 +111,12 @@ class CanardPlaneState(BasePlaneState):
     dynamics: fdm6DOF.FDM6DOF = fdm6DOF.createFDM6DOF()
     # Initialize airdata
     Wind: wind_sim.windSim = wind_sim.createwindSim(
-        jnp.array([200, 200, 50]),
+        jnp.array([200.0, 200.0, 50.0]),
         jnp.array([1.06, 1.06, 0.7]),
         jnp.array([0.0, 0.0, 0.0])
     )
-    VwindBody: jnp.ndarray = jnp.zeros(3)
-    VaBody: jnp.ndarray = jnp.zeros(3)
+    VwindBody: jnp.ndarray = jnp.zeros(3, dtype=float)
+    VaBody: jnp.ndarray = jnp.zeros(3, dtype=float)
     alpha: float = 0.0
     beta: float = 0.0
     VTAS: float = 0.0
@@ -126,18 +126,21 @@ class CanardPlaneState(BasePlaneState):
     alphadot: float = 0.0
     betadot: float = 0.0
     controlInputPWM: InputChannels = createInputChannels(
-        jnp.zeros(12)
+        jnp.zeros(12, dtype=float)  # 12个通道的PWM信号
     )
     controlSurface: control_surface.ControlSurface = control_surface.createControlSurface()
     engine: turbo_engineSW190B.TurboEngineSW190B = turbo_engineSW190B.createTurboEngineSW190B()
+    ax: float = 0.0
+    ay: float = 0.0
+    az: float = 0.0
 
 def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
                 roll=0.0, pitch=0.0, yaw=0.0,
-                velNED=jnp.zeros(3),
-                angVel=jnp.zeros(3),
-                accelNED=jnp.zeros(3),
+                velNED=jnp.zeros(3, dtype=float),
+                angVel=jnp.zeros(3, dtype=float),
+                accelNED=jnp.zeros(3, dtype=float),
                 fuelVolume=-1,
-                CSD=jnp.zeros(6)
+                CSD=jnp.zeros(6, dtype=float)
                 ):
     ''' dynamic model initialization. Initial LLA is set to be the origin of NED frame.
     Args:
@@ -269,7 +272,9 @@ def update(state, cmdInput, deltaT):
     forcesMoments = forcesMoments.at[3:6].set(Ma_b + MT_b)
 
     # update plane 6dof state
-    dynamics = fdm6DOF.update_motionstate(state.dynamics, deltaT, forcesMoments, planeParams)
+    dynamics = fdm6DOF.update_motionstate(state.dynamics, deltaT, forcesMoments, planeParams)   # 这里面已经算好加速度
+    # 把新的加速度(机体系)拷到 ax, ay, az
+    accel_b = dynamics.motionState.accel_Body  # shape=(3,)
     # Update RPY state
     qNED2Body = dynamics.motionState.quaternion_Body2NED.copy()
     qNED2Body = qNED2Body.at[1:].set(-qNED2Body[1:])
@@ -286,6 +291,9 @@ def update(state, cmdInput, deltaT):
         pitch=pitch,
         yaw=yaw,
         dynamics=dynamics,
+        ax=accel_b[0] / 9.81, # 因为accel_b是机体系下的加速度(单位是m/s^2)，所以要除以9.81，转化成三轴过载
+        ay=accel_b[1] / 9.81,
+        az=accel_b[2] / 9.81,
         # Initialize airdata
         controlInputPWM=controlInputPWM,
         controlSurface=controlSurface,

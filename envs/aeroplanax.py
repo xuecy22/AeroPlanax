@@ -7,6 +7,7 @@ from flax import struct
 import jax
 from jax import lax
 import jax.numpy as jnp
+from jax.tree_util import tree_map_with_path
 from gymnax.environments import environment
 from gymnax.environments import spaces
 from .core.simulators import fighterplane, canardplane, uav, missile
@@ -14,6 +15,26 @@ from .core.base_dataclass import BasePlaneState, BaseControlState, BaseMissileSt
 from .core.utils import update_blood, check_crashed, check_locked, check_shotdown, check_shotdown_by_missile, check_hit, check_miss
 from .utils.utils import enu_to_geodetic
 
+def debug_print_tree(prefix: str, tree):
+    """
+    打印 tree（一个 PyTree）中每个叶子节点的 dtype/shape/path。
+    prefix: 给输出加个前缀，方便区分是哪个状态
+    tree:   要查看的 PyTree 对象，比如 state_re 或 state_st
+    """
+    def _print_dtype(path, leaf):
+        """
+        path:  是一个元组，描述从根到这个叶子节点的路径
+        leaf:  叶子节点
+        """
+        if hasattr(leaf, 'dtype'):
+            # 说明是一个 jnp.ndarray 或类似，有 dtype 属性
+            print(f"{prefix}{path}: shape={leaf.shape}, dtype={leaf.dtype}")
+        else:
+            # 可能是个 bool、int、或 Python 标量，或者别的 py struct
+            # 直接打印其类型
+            print(f"{prefix}{path}: {type(leaf)}")
+
+    tree_map_with_path(_print_dtype, tree)
 
 @struct.dataclass
 class EnvState:
@@ -136,8 +157,8 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 actions = jnp.clip(actions, min=-1, max=1)
                 return state, jax.vmap(canardplane.CanardPlaneControlState.create)(actions)
             elif self.action_type == 1:
-                actions = jax.vmap(self._decode_discrete_actions)(actions)
-                return state, jax.vmap(canardplane.CanardPlaneControlState.create)(actions)
+                servo_in = jax.vmap(self.custom_decode_discrete_actions)(actions)
+                return state, servo_in
             else:
                 raise NotImplementedError
         elif self.agent_type == 2:
@@ -328,10 +349,10 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                     fighterplane.update, in_axes=(0, 0, None)
                 )(plane_states, action, 1 / params.sim_freq)
             elif self.agent_type == 1:
-                servo_in = jax.vmap(self.custom_decode_discrete_actions)(action)
+                # 这里 action 就是 shape=(N,12) 的 servo_in
                 next_plane_states = jax.vmap(
                     canardplane.update, in_axes=(0, 0, None)
-                )(plane_states, servo_in, 1 / params.sim_freq)
+                )(plane_states, action, 1 / params.sim_freq)
             elif self.agent_type == 2:
                 raise NotImplementedError
             if self.num_missiles > 0:
@@ -366,16 +387,22 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
 
         key, key_step = jax.random.split(key)
         state_st, info = self._step_task(key_step, state_st, info, actions, params)
+        # print("---- State after step ----")
+        # debug_print_tree("state_st", state_st)
 
         # Auto-reset environment based on termination
         key, key_reset = jax.random.split(key)
         obs_re, state_re = self.reset(key_reset, params)
+        # print("---- State after reset ----")
+        # debug_print_tree("state_re", state_re)
 
         state = jax.tree.map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), state_re, state_st
+            lambda x, y: jnp.where(dones["__all__"], x, y),
+            state_re, state_st
         )
         obs = jax.tree.map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
+            lambda x, y: jnp.where(dones["__all__"], x, y),
+            obs_re, obs_st
         )
 
         return lax.stop_gradient(obs), state, rewards, dones, info
@@ -575,7 +602,8 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         )
         state = state.replace(
             done=jnp.all(dones),
-            success=jnp.all(successes)
+            success=jnp.all(successes) # success：这是环境状态EnvState中的一个字段，表示整个环境是否成功（通常基于所有代理是否都成功）。
+                                       # successes：这是一个布尔型数组，用于记录每个代理是否成功。在方法内部，这个数组被用来更新环境状态中的飞机状态以及最终的环境成功标志。
         )
         dones = {
             agent: dones[i] for i, agent in enumerate(self.agents)

@@ -37,7 +37,7 @@ class TurboEngineSW190B:
     DCM_Engine2Body: jnp.ndarray
     Xu: jnp.ndarray
 
-def createTurboEngineSW190B(throttle=0, pos=jnp.array([0, 0, 0]), azimuth=0.0, elevation=0.0):
+def createTurboEngineSW190B(throttle=0.0, pos=jnp.array([0.0, 0.0, 0.0]), azimuth=0.0, elevation=0.0):
     """Turbo engine model: from throttle percent to engine RPM and thrust, fuel consumption.
 
     Args:
@@ -54,11 +54,11 @@ def createTurboEngineSW190B(throttle=0, pos=jnp.array([0, 0, 0]), azimuth=0.0, e
         position  # Engine installation position in body frame, unit in meters
         DCM  # Engine installation attitude DCM, from engine frame to plane body frame.
     """
-    throttle = jnp.clip(throttle, 0, 100)
+    throttle = jnp.clip(throttle, 0.0, 100.0)
     RPM = thr2rpm(throttle)
     RPMcmd = RPM
     SFC = Static_Thr2SFC(throttle)
-    Thrust = jnp.array([Static_Thr2Thrust(throttle), 0, 0])
+    Thrust = jnp.array([Static_Thr2Thrust(throttle), 0.0, 0.0])
 
     position = pos
     azimuth_rad = (jnp.radians(azimuth))
@@ -70,7 +70,7 @@ def createTurboEngineSW190B(throttle=0, pos=jnp.array([0, 0, 0]), azimuth=0.0, e
     DCM_Engine2Body = jnp.array([[cos_phi*cos_theta, sin_phi, -cos_phi*sin_theta],
                                  [-sin_phi*cos_theta, cos_phi, sin_phi*sin_theta],
                                  [sin_theta, 0, cos_theta]])
-    Xu = jnp.zeros(2)
+    Xu = jnp.zeros(2, dtype=float)
     state = TurboEngineSW190B(
         RPM=RPM,
         RPMcmd=RPMcmd,

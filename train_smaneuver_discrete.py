@@ -135,7 +135,7 @@ def make_train(config):
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
     if "LOADDIR" in config:
-        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        network = ActorCriticRNN([66, 84, 75, 86], config=config)
         rng = jax.random.PRNGKey(42)
         init_x = (
             jnp.zeros(

@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Any
 import functools
 import jax
 import jax.numpy as jnp
@@ -233,7 +233,7 @@ class AeroPlanaxSManEnv(AeroPlanaxEnv[SManEnvState, SManEnvParams]):
             q2=q2_init,
             q3=q3_init,
             alpha=jnp.zeros((self.num_agents,)),
-            beta=jnp.zeros((self.num_agents,))
+            beta=jnp.zeros((self.num_agents,)),
         )
 
         # 6) 目标航向/高度/速度
@@ -316,8 +316,7 @@ class AeroPlanaxSManEnv(AeroPlanaxEnv[SManEnvState, SManEnvParams]):
             flag=jnp.zeros((self.num_agents,)),
             last_check_time=jnp.zeros((self.num_agents,)),
             maneuvers_completed=jnp.zeros((self.num_agents,)),
-            process_reward=jnp.zeros((self.num_agents,)),
-            success=False
+            process_reward=jnp.zeros((self.num_agents,))
         )
         return new_state
 
@@ -325,7 +324,12 @@ class AeroPlanaxSManEnv(AeroPlanaxEnv[SManEnvState, SManEnvParams]):
     # step逻辑（S机动特定）
     ############################################################################
     @functools.partial(jax.jit, static_argnums=(0,))
-    def _step_task(self, key, state: SManEnvState, action, params: SManEnvParams) -> SManEnvState:
+    def _step_task(self, 
+                   key, 
+                   state: SManEnvState, 
+                   info: Dict[str, Any],
+                   action, 
+                   params: SManEnvParams) -> SManEnvState:
         """
         每步都执行“S机动”更新逻辑：若时间到/航向误差小/滚转角小，则更新目标航向（±40°）
         """
@@ -394,9 +398,6 @@ class AeroPlanaxSManEnv(AeroPlanaxEnv[SManEnvState, SManEnvParams]):
         upd_tq1 = jnp.zeros_like(upd_tq0)
         upd_tq2 = jnp.zeros_like(upd_tq0)
 
-        # 成功条件：完成 4 次机动
-        success = upd_maneuvers >= 4
-
         new_state = state.replace(
             delta_heading_deg=upd_dH,
             last_check_time=upd_lck,
@@ -407,10 +408,9 @@ class AeroPlanaxSManEnv(AeroPlanaxEnv[SManEnvState, SManEnvParams]):
             target_q2=upd_tq2, # body->NED
             target_q3=upd_tq3, # body->NED
             maneuvers_completed=upd_maneuvers,
-            success=success,
             process_reward=process_reward
         )
-        return new_state
+        return new_state, info
 
     ############################################################################
     # 获取观测 # q:body->NED

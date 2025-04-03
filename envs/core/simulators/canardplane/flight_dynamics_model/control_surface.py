@@ -171,7 +171,7 @@ def Static_GetServoPWM(CSDAngle):
     PWM = PWM.at[5].set(RVT_Angle2PWM(CSDAngle[5]))
     return PWM
 
-def createControlSurface(delta=jnp.zeros(6)):
+def createControlSurface(delta=jnp.zeros(6, dtype=float)):
     """Control surface deviation model: from servo PWM to control surface angle
 
     Args:
