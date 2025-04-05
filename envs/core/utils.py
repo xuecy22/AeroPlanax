@@ -13,6 +13,18 @@ def check_collision(state: BasePlaneState, agent_id, R=50):
     distance = distance.at[agent_id].set(jnp.finfo(jnp.float32).max)
     distance = jnp.where(alive, distance, jnp.finfo(jnp.float32).max)
     done = jnp.any(distance < R)
+
+    # 只在 done==True 时打印（转换成 Python 标量）
+    # jax.lax.cond(
+    #     done,
+    #     lambda _: hcb.id_print(
+    #         None, 
+    #         what=f"[check_collision] agent={agent_id}, min_distance={float(jnp.min(distance)):.1f}, done={bool(done)}"
+    #     ),
+    #     lambda _: None,
+    #     operand=None
+    # )
+
     return done
 
 def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-5.0, max_beta=5.0):
@@ -21,25 +33,70 @@ def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alph
     mask1 = (alpha < min_alpha) | (alpha > max_alpha)
     mask2 = (beta < min_beta) | (beta > max_beta)
     done = mask1 | mask2
+    jax.lax.cond(
+        done,
+        lambda _: jax.debug.print(
+            "[check_extreme_state] agent={aid}, alpha={alpha:.2f}, beta={beta:.2f}, mask1={mask1}, mask2={mask2}",
+            aid=agent_id, alpha=alpha, beta=beta, mask1=mask1, mask2=mask2
+        ),
+        lambda _: None,
+        operand=None
+    )
     return done
 
 def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3):
     velocity = state.vt[agent_id] / 340
     done = velocity > max_velocity
+    # jax.lax.cond(
+    #     done,
+    #     lambda _: jax.debug.print(
+    #         "[check_high_speed] agent={}, vt={} m/s ({} Mach), done={}",
+    #         agent_id, state.vt[agent_id], velocity, done
+    #     ),
+    #     lambda _: None,
+    #     operand=None
+    # )
     return done
 
 def check_low_speed(state: BasePlaneState, agent_id, min_velocity=0.01):
     velocity = state.vt[agent_id] / 340
     done = velocity < min_velocity
+    # jax.lax.cond(
+    #     done,
+    #     lambda _: jax.debug.print(
+    #         "[check_low_speed] agent={}, vt={} m/s ({} Mach), done={}",
+    #         agent_id, state.vt[agent_id], velocity, done
+    #     ),
+    #     lambda _: None,
+    #     operand=None
+    # )
     return done
 
-def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=2500.0):
+def check_low_altitude(state: BasePlaneState, agent_id, altitude_limit=10.0):
     altitude = state.altitude[agent_id]
     done = altitude < altitude_limit
+    # jax.lax.cond(
+    #     done,
+    #     lambda _: hcb.id_print(
+    #         None, 
+    #         what=f"[check_low_altitude] agent={agent_id}, altitude={float(altitude):.2f}, limit={float(altitude_limit):.2f}, done={bool(done)}"
+    #     ),
+    #     lambda _: None,
+    #     operand=None
+    # )
     return done
 
 def check_overload(state: BasePlaneState, agent_id, max_overload=8.0):
     done = state.az[agent_id] < -max_overload
+    # jax.lax.cond(
+    #     done,
+    #     lambda _: hcb.id_print(
+    #         None, 
+    #         what=f"[check_overload] agent={agent_id}, az={float(state.az[agent_id]):.2f}, max_overload={float(max_overload):.2f}, done={bool(done)}"
+    #     ),
+    #     lambda _: None,
+    #     operand=None
+    # )
     return done
 
 def check_crashed(state: BasePlaneState, agent_id):
@@ -50,6 +107,15 @@ def check_crashed(state: BasePlaneState, agent_id):
     mask5 = check_low_altitude(state, agent_id)
     mask6 = check_overload(state, agent_id)
     crashed = mask1 | mask2 | mask3 | mask4 | mask5 | mask6
+    jax.lax.cond(
+        crashed,
+        lambda _: jax.debug.print(
+            "[check_crashed] agent={}, crashed={}, mask1={}, mask2={}, mask3={}, mask4={}, mask5={}, mask6={}", 
+            agent_id, crashed, mask1, mask2, mask3, mask4, mask5, mask6
+        ),
+        lambda _: None,
+        operand=None
+    )
     return crashed
 
 def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp.pi/3):

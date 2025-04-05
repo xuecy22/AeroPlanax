@@ -165,19 +165,21 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             raise NotImplementedError
     
     @functools.partial(jax.jit, static_argnums=(0,))
-    def custom_normalize(self, action, low, high, range_vals, action_space_max):
-        # 当 action <= low 时，采用线性映射到 [range_vals[0], range_vals[1]]
-        # 当 low < action <= high 时，映射到 [range_vals[1], range_vals[2]]
-        # 当 action > high 时，映射到 [range_vals[2], range_vals[3]]
-        return jnp.where(
-            action <= low,
-            (action / low) * (range_vals[1] - range_vals[0]) + range_vals[0],
-            jnp.where(
-                action <= high,
-                ((action - low) / (high - low)) * (range_vals[2] - range_vals[1]) + range_vals[1],
-                ((action - high) / (action_space_max - high - 1)) * (range_vals[3] - range_vals[2]) + range_vals[2]
-            )
-        )
+    # def custom_normalize(self, action, low, high, range_vals, action_space_max):
+    #     # 当 action <= low 时，采用线性映射到 [range_vals[0], range_vals[1]]
+    #     # 当 low < action <= high 时，映射到 [range_vals[1], range_vals[2]]
+    #     # 当 action > high 时，映射到 [range_vals[2], range_vals[3]]
+    #     return jnp.where(
+    #         action <= low,
+    #         (action / low) * (range_vals[1] - range_vals[0]) + range_vals[0],
+    #         jnp.where(
+    #             action <= high,
+    #             ((action - low) / (high - low)) * (range_vals[2] - range_vals[1]) + range_vals[1],
+    #             ((action - high) / (action_space_max - high - 1)) * (range_vals[3] - range_vals[2]) + range_vals[2]
+    #         )
+    #     )
+    def custom_normalize(action, min_val, max_val, action_dim):
+        return min_val + (max_val - min_val) * (action / (action_dim - 1))
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _decode_discrete_actions(
@@ -194,18 +196,34 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             norm_act = norm_act.at[3].set(actions[3] * 2. / 40. - 1.) # rudder
         elif self.agent_type == 1: # canardplane
             # 使用 custom_normalize 将离散动作映射到对应的连续控制信号
-            norm_act = norm_act.at[0].set(
-                self.custom_normalize(actions[0], 13, 53, jnp.array([1100, 1370, 1710, 1950]), 66)
-            )  # throttle
-            norm_act = norm_act.at[1].set(
-                self.custom_normalize(actions[1], 12, 52, jnp.array([1100, 1340, 1640, 2000]), 84)
-            )  # elevator
-            norm_act = norm_act.at[2].set(
-                self.custom_normalize(actions[2], 15, 60, jnp.array([1100, 1350, 1620, 1980]), 75)
-            )  # aileron
-            norm_act = norm_act.at[3].set(
-                self.custom_normalize(actions[3], 20, 55, jnp.array([1170, 1530, 1880, 2000]), 86)
-            )  # rudder
+            # norm_act = norm_act.at[0].set(
+            #     self.custom_normalize(actions[0], 13, 53, jnp.array([1100, 1370, 1710, 1950]), 66)
+            # )  # throttle
+            # norm_act = norm_act.at[1].set(
+            #     self.custom_normalize(actions[1], 12, 52, jnp.array([1100, 1340, 1640, 2000]), 84)
+            # )  # elevator
+            # norm_act = norm_act.at[2].set(
+            #     self.custom_normalize(actions[2], 15, 60, jnp.array([1100, 1350, 1620, 1980]), 75)
+            # )  # aileron
+            # norm_act = norm_act.at[3].set(
+            #     self.custom_normalize(actions[3], 20, 55, jnp.array([1170, 1530, 1880, 2000]), 86)
+            # )  # rudder
+            # Throttle: 1100-2000us对应0-65
+            norm_act = norm_act.at[0].set(self.custom_normalize(actions[0], 1100.0, 2000.0, 66))
+            # Elevator: 1200-1800us对应0-83
+            norm_act = norm_act.at[1].set(self.custom_normalize(actions[1], 1200.0, 1800.0, 84))
+            # Aileron: 1300-1700us对应0-74
+            norm_act = norm_act.at[2].set(self.custom_normalize(actions[2], 1300.0, 1700.0, 75))
+            # Rudder: 1400-1600us对应0-85 
+            norm_act = norm_act.at[3].set(self.custom_normalize(actions[3], 1400.0, 1600.0, 86))
+            # 各通道参数配置 --------------------------------------------------------
+            # | 通道     | 离散动作范围 | 对应PWM范围   | 动作维度 | 映射公式                  |
+            # |----------|-------------|--------------|---------|-------------------------|
+            # | throttle | 0~65        | 1100~1950    | 66      | 1100 + 850*(action/65)  |
+            # | elevator | 0~83        | 1340~2000    | 84      | 1340 + 660*(action/83)  |
+            # | aileron  | 0~74        | 1350~1980    | 75      | 1350 + 630*(action/74)  |
+            # | rudder   | 0~85        | 1530~2000    | 86      | 1530 + 470*(action/85)  |
+            # ----------------------------------------------------------------------
         return norm_act
 
     @property

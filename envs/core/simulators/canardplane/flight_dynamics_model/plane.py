@@ -315,6 +315,16 @@ def update_air_data(state, rho, Ts):
     # sideslip angle in rad
     beta = jnp.arcsin(VaBody[1] / (VTAS + 1e-8))
 
+    ##################################################################################
+    # MAX_ALPHA = jnp.deg2rad(45.0)  # 限制最大迎角45°
+    # MIN_ALPHA = jnp.deg2rad(-20.0)
+    # alpha = jnp.clip(alpha, -MIN_ALPHA, MAX_ALPHA)
+    
+    # MAX_BETA = jnp.deg2rad(5.0)   # 限制最大侧滑角10°
+    # MIN_BETA = jnp.deg2rad(-5.0)
+    # beta = jnp.clip(beta, -MIN_BETA, MAX_BETA)
+    ##################################################################################
+
     rho_sealevel = 1.225  # kg/m^3
     VIAS = jnp.sqrt(rho / rho_sealevel) * VTAS
     R = 287.05287        # J/(kg*K)
