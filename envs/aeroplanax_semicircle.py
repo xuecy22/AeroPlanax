@@ -25,12 +25,13 @@ from .utils.utils import wrap_PI, wedge_formation, line_formation, diamond_forma
 
 
 @struct.dataclass
-class HeadingTaskState(EnvState):
+class SemicircleTaskState(EnvState):
     target_heading: ArrayLike 
     target_altitude: ArrayLike
     target_vt: ArrayLike
     last_check_time: ArrayLike
     heading_turn_counts: ArrayLike
+
 
     @classmethod
     def create(cls, env_state: EnvState, extra_state: Array):
@@ -50,7 +51,7 @@ class HeadingTaskState(EnvState):
 
 
 @struct.dataclass(frozen=True)
-class HeadingTaskParams(EnvParams):
+class SemicircleTaskParams(EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
     num_missiles: int = 0
@@ -71,10 +72,17 @@ class HeadingTaskParams(EnvParams):
     noise_scale: float = 0.0
     team_spacing: float = 15000       
     safe_distance: float = 3000 # 编队最小安全间距
+    # 固定高度和速度
+    fixed_altitude: float = 2000.0
+    fixed_speed: float = 340.0
+
+    # 定义完成半圆所需的总步数
+    total_turn_steps: int = 20
+    heading_increment: float = jnp.pi / total_turn_steps
 
 
-class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
-    def __init__(self, env_params: Optional[HeadingTaskParams] = None):
+class AeroPlanaxSemicircleEnv(AeroPlanaxEnv[SemicircleTaskState, SemicircleTaskParams]):
+    def __init__(self, env_params: Optional[SemicircleTaskParams] = None):
         super().__init__(env_params)
         self.formation_type = env_params.formation_type
 
@@ -109,32 +117,30 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         return 16
 
     @property
-    def default_params(self) -> HeadingTaskParams:
-        return HeadingTaskParams()
+    def default_params(self) -> SemicircleTaskParams:
+        return SemicircleTaskParams()
 
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _init_state(
         self,
         key: jax.Array,
-        params: HeadingTaskParams,
-    ) -> HeadingTaskState:
+        params: SemicircleTaskParams,
+    ) -> SemicircleTaskState:
         state = super()._init_state(key, params)
-        state = HeadingTaskState.create(state, extra_state=jnp.zeros((3, self.num_agents)))
+        state = SemicircleTaskState.create(state, extra_state=jnp.zeros((3, self.num_agents)))
         return state
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _reset_task(
         self,
         key: chex.PRNGKey,
-        state: HeadingTaskState,
-        params: HeadingTaskParams,
-    ) -> HeadingTaskState:
+        state: SemicircleTaskState,
+        params: SemicircleTaskParams,
+    ) -> SemicircleTaskState:
         """Task-specific reset."""
         state = self._generate_formation(key, state, params)
-        key, key_vt = jax.random.split(key)
-        vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)        # 随机初始速度
-        vel_x = vt
+
 
         # key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
         # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
@@ -147,12 +153,14 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
 
         state = state.replace(
             plane_state=state.plane_state.replace(
-                vel_x=vel_x,
-                vt=vt,
+                altitude=jnp.full((self.num_agents,), params.fixed_altitude),
+                vt=jnp.full((self.num_agents,), params.fixed_speed),
+                vel_x=jnp.full((self.num_agents,), params.fixed_speed),
             ),
-            target_heading=state.plane_state.yaw,  # 初始目标航向=当前航向
-            target_altitude=state.plane_state.altitude, # 目标高度=当前高度
-            target_vt=vt,                     # 目标速度=随机初始速度
+            target_heading = jnp.full((self.num_agents,), state.plane_state.yaw),  # 初始目标航向=当前航向
+            target_altitude = jnp.full((self.num_agents,), params.fixed_altitude), # 目标高度 = fixed_altitude
+            target_vt = jnp.full((self.num_agents,), params.fixed_speed),          # 目标速度 = fixed_speed
+            heading_turn_counts = jnp.full((self.num_agents,), 0),                         # 重置航向转动计数器
         )
         return state
 
@@ -160,35 +168,48 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     def _step_task(
         self,
         key: chex.PRNGKey,
-        state: HeadingTaskState,
+        state: SemicircleTaskState,
         info: Dict[str, Any],
         action: Dict[AgentName, chex.Array],
-        params: HeadingTaskParams,
-    ) -> Tuple[HeadingTaskState, Dict[str, Any]]:
+        params: SemicircleTaskParams,
+    ) -> Tuple[SemicircleTaskState, Dict[str, Any]]:
         """Task-specific step transition."""
+        #################################################################################################################
         # TODO: only fit single agent
-        key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
-         # 随机航向变化量(-π, π)
-        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
-         # 高度变化量(±2100m)
-        delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
-        # 速度变化量(±100m/s)
-        delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
-        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=jnp.pi / 2, maxval=jnp.pi / 2)
-        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=0, maxval=0)
-        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=0, maxval=0)
+        # key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
 
-        target_altitude = state.plane_state.altitude + delta_altitude * delta
-        target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
-        target_vt = state.plane_state.vt + delta_vt * delta
+        # delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
+        
+
+        #  # 随机航向变化量(-π, π)
+        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
+        #  # 高度变化量(±2100m)
+        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        # # 速度变化量(±100m/s)
+        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+
+        # target_altitude = state.plane_state.altitude + delta_altitude * delta
+        # target_vt = state.plane_state.vt + delta_vt * delta
+        # target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
+
+        #################################################################################################################
+        target_altitude = jnp.full_like(state.target_altitude, params.fixed_altitude)
+        target_vt = jnp.full_like(state.target_vt, params.fixed_speed)
+
+
+        new_target_heading = jnp.where(
+            state.heading_turn_counts < params.total_turn_steps,
+            wrap_PI(state.target_heading + params.heading_increment), # 如果还未完成半圆转动，则更新目标航向
+            state.target_heading  # 完成转动后保持不变
+        )
+        #################################################################################################################
 
         new_state = state.replace(
             plane_state=state.plane_state.replace(
                 status=jnp.where(state.plane_state.is_success, 0, state.plane_state.status)
             ),
             success=False,
-            target_heading=target_heading,
+            target_heading=new_target_heading,
             target_altitude=target_altitude,
             target_vt=target_vt,
             last_check_time=state.time,
@@ -201,8 +222,8 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_obs(
         self,
-        state: HeadingTaskState,
-        params: HeadingTaskParams,
+        state: SemicircleTaskState,
+        params: SemicircleTaskParams,
     ) -> Dict[AgentName, chex.Array]:
         """
         Task-specific observation function to state.
@@ -256,9 +277,9 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     def _generate_formation(
             self,
             key: chex.PRNGKey,
-            state: HeadingTaskState,
-            params: HeadingTaskParams,
-        ) -> HeadingTaskState:
+            state: SemicircleTaskState,
+            params: SemicircleTaskParams,
+        ) -> SemicircleTaskState:
 
         # 根据队形类型选择生成函数
         if self.formation_type == 0:
