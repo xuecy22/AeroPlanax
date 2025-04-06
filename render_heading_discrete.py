@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -260,7 +260,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax/results/2025-04-01-00-51/checkpoints/checkpoint_epoch_300" 
+    "LOADDIR": "/home/xcy/AeroPlanax-heading/envs/models/baseline" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)
