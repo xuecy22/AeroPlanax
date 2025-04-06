@@ -50,7 +50,7 @@ class HeadingTaskParams(EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
     num_missiles: int = 0
-    agent_type: int = 1   # 0: fighterplane, 1: canardplane, 2: uav
+    agent_type: int = 0
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     max_altitude: float = 9000
     min_altitude: float = 4200
@@ -133,7 +133,6 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
             target_heading=target_heading,
             target_altitude=target_altitude,
             target_vt=target_vt,
-            last_check_time=state.time
         )
         return state
 
@@ -148,7 +147,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
     ) -> HeadingTaskState:
         """Task-specific step transition."""
         new_state = state.replace(
-            last_check_time=state.time,
+            last_check_time = state.time,
         )
         return new_state, info
 
@@ -184,7 +183,7 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         vt = state.plane_state.vt
         alpha = state.plane_state.alpha
         beta = state.plane_state.beta
-        P, Q, R = state.plane_state.dynamics.motionState.angularSpeed_Body[:, 0], state.plane_state.dynamics.motionState.angularSpeed_Body[:, 1], state.plane_state.dynamics.motionState.angularSpeed_Body[:, 2]
+        P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
 
         norm_delta_altitude = (altitude - state.target_altitude) / 1000
         norm_delta_heading = wrap_PI((yaw - state.target_heading))

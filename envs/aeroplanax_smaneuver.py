@@ -431,15 +431,25 @@ class AeroPlanaxSManEnv(AeroPlanaxEnv[SManEnvState, SManEnvParams]):
         pitch_rad = plane.pitch
         yaw_rad = plane.yaw
 
+        # # 角速度
+        # p = plane.dynamics.motionState.angularSpeed_Body[:, 0]  # shape (num_agents,)
+        # q = plane.dynamics.motionState.angularSpeed_Body[:, 1]
+        # r = plane.dynamics.motionState.angularSpeed_Body[:, 2]
+
+        # # 加速度
+        # acc_x = plane.dynamics.motionState.accel_Body[:, 0]  # shape (num_agents,)
+        # acc_y = plane.dynamics.motionState.accel_Body[:, 1]
+        # acc_z = plane.dynamics.motionState.accel_Body[:, 2]
+
         # 角速度
-        p = plane.dynamics.motionState.angularSpeed_Body[:, 0]  # shape (num_agents,)
-        q = plane.dynamics.motionState.angularSpeed_Body[:, 1]
-        r = plane.dynamics.motionState.angularSpeed_Body[:, 2]
+        p = plane.P
+        q = plane.Q
+        r = plane.R
 
         # 加速度
-        acc_x = plane.dynamics.motionState.accel_Body[:, 0]  # shape (num_agents,)
-        acc_y = plane.dynamics.motionState.accel_Body[:, 1]
-        acc_z = plane.dynamics.motionState.accel_Body[:, 2]
+        acc_x = plane.ax
+        acc_y = plane.ay
+        acc_z = plane.az
 
         # 四元数 q_{Body}^q_{NED}
         q0 = plane.q0
