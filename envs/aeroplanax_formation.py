@@ -54,10 +54,11 @@ class FormationTaskParams(EnvParams):
     max_vt: float = 360
     min_vt: float = 300
     noise_scale: float = 0.0
-    team_spacing: float = 15000       
+    team_spacing: float = 15000
+    init_position_offset_factor = 2.0 # 初始坐标(仅x,y)浮动范围(+-)R相对于team_spacing的倍数；初始坐标z则是相对于max_altitude-min_altitude的倍数
     safe_distance: float = 3000
     unit_features: int = 4
-    own_features: int = 6
+    own_features: int = 9
 
 class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskParams]):
     def __init__(self, env_params: Optional[FormationTaskParams] = None):
@@ -76,7 +77,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
 
         self.reward_functions = [
             functools.partial(formation_reward_fn, reward_scale=1.0, valid_distance=1000.0),
-            functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
+            functools.partial(event_driven_reward_fn, fail_reward=-10, success_reward=10),
         ]
 
         self.termination_conditions = [
@@ -137,7 +138,41 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         )
         return state
 
+    @property
+    def global_obs_size(self) -> int:
+        return 8 * self.num_agents
     
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def get_global_obs(
+        self,
+        state: FormationTaskState,
+    ) -> chex.Array:
+        '''
+        - N * team observation
+            - [0]. norm_east      (unit: 1km)
+            - [1]. norm_west      (unit: 1km)
+            - [2]. norm_altitude  (unit: 5km)
+            - [3]. roll_sin      
+            - [4]. roll_cos      
+            - [5]. pitch_sin     
+            - [6]. pitch_cos     
+            - [7]. norm_vt            (unit: mh)
+        '''
+        def _observe_features(state: FormationTaskState, i: int):
+            roll, pitch = state.plane_state.roll[i], state.plane_state.pitch[i]
+            roll_sin = jnp.sin(roll)
+            roll_cos = jnp.cos(roll)
+            pitch_sin = jnp.sin(pitch)
+            pitch_cos = jnp.cos(pitch)
+
+            features = jnp.hstack((state.plane_state.north[i]/1000, state.plane_state.east[i]/1000, state.plane_state.altitude[i]/5000,
+                                    roll_sin, roll_cos, pitch_sin, pitch_cos, state.plane_state.vt[i]/340))
+            return features
+        
+        get_all_features = jax.vmap(_observe_features, in_axes=(None,0))
+
+        return get_all_features(state, jnp.arange(self.num_agents)).reshape((-1))
+
     # 获取观测值
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_obs(
@@ -153,13 +188,17 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             - [1] norm_delta_altitude   (unit: km)
             - [2] norm_AO               (unit: rad) [0, pi]
             - [3] norm_distance         (unit: 10km)
-        - ego observation(dim 6):
-            - [0]. norm_altitude      (unit: 5km)
-            - [1]. roll_sin      
-            - [2]. roll_cos      
-            - [3]. pitch_sin     
-            - [4]. pitch_cos     
-            - [5]. norm_vt            (unit: mh)
+        - ego observation(dim 9):
+            - [0]. delta_norm_east      (unit: 1km)
+            - [1]. delta_norm_west      (unit: 1km)
+            - [2]. delta_norm_altitude  (unit: 1km)
+            
+            - [3]. norm_altitude      (unit: 5km)
+            - [4]. roll_sin      
+            - [5]. roll_cos      
+            - [6]. pitch_sin     
+            - [7]. pitch_cos     
+            - [8]. norm_vt            (unit: mh)
         """
         
         def _observe_features(state: FormationTaskState, i: int, j_idx: int):
@@ -212,34 +251,40 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
                 lambda: empty_features,
             )
 
+        def _get_own_features(state: FormationTaskState, i: int):
+            altitude = state.plane_state.altitude[i]
+            roll, pitch = state.plane_state.roll[i], state.plane_state.pitch[i]
+            vt = state.plane_state.vt[i]
+            norm_altitude = altitude / 5000
+            roll_sin = jnp.sin(roll)
+            roll_cos = jnp.cos(roll)
+            pitch_sin = jnp.sin(pitch)
+            pitch_cos = jnp.cos(pitch)
+            norm_vt = vt / 340
+
+            norm_delta_north = (state.plane_state.north[i] - state.formation_positions[i, 0]) / 1000
+            norm_delta_east = (state.plane_state.east[i] - state.formation_positions[i, 1]) / 1000
+            norm_delta_altitude = (altitude - state.formation_positions[i, 2]) / 1000
+
+            # NOTE: self.own_features == features.shape[0]
+            empty_features = jnp.zeros(shape=(self.own_features,))
+            features = jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vt))
+
+            return jax.lax.cond(
+                state.plane_state.is_alive[i], lambda: features, lambda: empty_features
+            )
+        
         get_all_features_for_unit = jax.vmap(get_features, in_axes=(None, 0))
         get_all_features = jax.vmap(get_all_features_for_unit, in_axes=(0, None))
         other_unit_obs = get_all_features(
             jnp.arange(self.num_agents), jnp.arange(self.num_agents - 1)
         )
         other_unit_obs = other_unit_obs.reshape((self.num_agents, -1))
-        get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
+        get_all_self_features = jax.vmap(_get_own_features, in_axes=(None, 0))
         own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
         obs = jnp.concatenate([other_unit_obs, own_unit_obs], axis=-1)
         return {agent: obs[self.agent_ids[agent]] for agent in self.agents}
-    
 
-    @functools.partial(jax.jit, static_argnums=(0,))
-    def _get_own_features(self, state: FormationTaskState, i: int):
-        altitude = state.plane_state.altitude[i]
-        roll, pitch = state.plane_state.roll[i], state.plane_state.pitch[i]
-        vt = state.plane_state.vt[i]
-        norm_altitude = altitude / 5000
-        roll_sin = jnp.sin(roll)
-        roll_cos = jnp.cos(roll)
-        pitch_sin = jnp.sin(pitch)
-        pitch_cos = jnp.cos(pitch)
-        norm_vt = vt / 340
-        empty_features = jnp.zeros(shape=(self.own_features,))
-        features = jnp.hstack((norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vt))
-        return jax.lax.cond(
-            state.plane_state.is_alive[i], lambda: features, lambda: empty_features
-        )
 
     @functools.partial(jax.jit, static_argnums=(0, ))
     def _generate_formation(
@@ -248,7 +293,9 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             state: FormationTaskState,
             params: FormationTaskParams,
         ):
-
+        if self.num_allies != self.num_agents:
+            raise ValueError("num_enemy > 0 in FormationEnv")
+        
         if self.formation_type == 0:
             team_positions = wedge_formation(self.num_allies, params.team_spacing)
         elif self.formation_type == 1:
@@ -263,9 +310,26 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         altitude = jax.random.uniform(key_altitude, minval=params.min_altitude, maxval=params.max_altitude)
         team_center =  team_center.at[2].set(altitude)
         formation_positions = enforce_safe_distance(team_positions, team_center, params.safe_distance)
+
+        # NOTE: 目标形状固定，但是初始位置有随机偏移量
+        formation_positions:jax.Array
+
+        R_XY = params.init_position_offset_factor * params.team_spacing
+        R_Z = params.init_position_offset_factor * (params.max_altitude - params.min_altitude)
+        key_xy, key_z = jax.random.split(key)
+
+        dxy = jax.random.uniform(key_xy, shape=(self.num_allies,2), minval=-R_XY, maxval=R_XY)
+        init_positions = formation_positions.at[:, 0:2].add(dxy)
+        
+        dz = jax.random.uniform(key_z, shape=(self.num_allies,), minval=-R_Z, maxval=R_Z)
+        init_positions = init_positions.at[:, 2].add(dz)
+
+        init_positions = enforce_safe_distance(init_positions, team_center, params.safe_distance)
+
         state = state.replace(plane_state=state.plane_state.replace(
-            north=formation_positions[:, 0],
-            east=formation_positions[:, 1],
-            altitude=formation_positions[:, 2]
+            north=init_positions[:, 0],
+            east=init_positions[:, 1],
+            altitude=init_positions[:, 2]
         ))
+
         return state, formation_positions

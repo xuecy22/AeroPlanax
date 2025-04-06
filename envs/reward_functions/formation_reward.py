@@ -1,8 +1,5 @@
 import jax.numpy as jnp
-from typing import TYPE_CHECKING
-from jax import vmap
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
-from ..utils.utils import wrap_PI
 
 
 def formation_reward_fn(
@@ -18,7 +15,7 @@ def formation_reward_fn(
 
     dist = jnp.linalg.norm(target_pos - current_pos)
     
-    reward_formation = -jnp.where(dist < valid_distance, 0.0, dist) / 1000
+    reward_formation = jnp.where(dist < valid_distance, 15000 - 10 * dist, -dist) / 1000000
 
     mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
     return reward_formation * reward_scale * mask

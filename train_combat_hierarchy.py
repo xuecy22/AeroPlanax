@@ -19,7 +19,8 @@ import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams
+from envs.aeroplanax_combat_with_missile import AeroPlanaxCombatwithMissileEnv, CombatwithMissileTaskParams
+from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -87,7 +88,6 @@ class ActorCriticRNN(nn.Module):
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
             critic
         )
-
         return hidden, pi, jnp.squeeze(critic, axis=-1)
 
 
@@ -112,8 +112,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env_params = FormationTaskParams()
-    env = AeroPlanaxFormationEnv(env_params)
+    env_params = CombatTaskParams()
+    env = AeroPlanaxCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config["NUM_UPDATES"] = (
@@ -249,6 +249,12 @@ def make_train(config):
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.done)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.action)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.value)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.reward)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.log_prob)))
+            # jax.debug.print('detect nan: {}', jnp.any(jnp.isnan(traj_batch.obs)))
 
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, last_done, hstate, rng = runner_state
@@ -258,6 +264,7 @@ def make_train(config):
             )
             _, _, last_val = network.apply(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze(0)
+            # jax.debug.breakpoint()
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -435,7 +442,14 @@ def make_train(config):
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
                         metric["success"][metric["returned_episode"]].mean(),
                     ))
+                    
+                jax.debug.print('loss :{}',metric['loss'])
+                # jax.debug.print('returned_episode_lengths :{}',metric['returned_episode_lengths'][0])
+                # jax.debug.print('returned_episode_returns :{}',metric['returned_episode_returns'][0])
+                jax.debug.print('returned_episode :{}',metric['returned_episode'][0])
+                jax.debug.print('returned_episode any:{}',jnp.any(metric['returned_episode']))
                 jax.experimental.io_callback(callback, None, metric)
+                
             update_steps = update_steps + 1    
             runner_state = (train_state, env_state, last_obs, last_done, hstate, rng)
             return (runner_state, update_steps), metric
@@ -459,13 +473,13 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "formation",
+    "GROUP": "combat_with_missile",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 1000,
-    "NUM_ACTORS": 2,
-    "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 1e9,
+    "NUM_ENVS": 5,
+    "NUM_ACTORS": 1,
+    "NUM_STEPS": 100,
+    "TOTAL_TIMESTEPS": 1e4,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -492,9 +506,9 @@ wandb.init(
     project="AeroPlanax",
     # track hyperparameters and run metadata
     config=config,
-    name=f'seed_{seed}',
+    name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
     group=config['GROUP'],
-    notes='2 agents',
+    notes='hierarchical',
     # dir=config['LOGDIR'],
     reinit=True,
 )
