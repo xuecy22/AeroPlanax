@@ -157,7 +157,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
                 actions = jnp.clip(actions, min=-1, max=1)
                 return state, jax.vmap(canardplane.CanardPlaneControlState.create)(actions)
             elif self.action_type == 1:
-                servo_in = jax.vmap(self.custom_decode_discrete_actions)(actions)
+                servo_in = jax.vmap(self._decode_discrete_actions)(actions)
                 return state, servo_in
             else:
                 raise NotImplementedError
@@ -178,7 +178,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     #             ((action - high) / (action_space_max - high - 1)) * (range_vals[3] - range_vals[2]) + range_vals[2]
     #         )
     #     )
-    def custom_normalize(action, min_val, max_val, action_dim):
+    def custom_normalize(self, action, min_val, max_val, action_dim):
         return min_val + (max_val - min_val) * (action / (action_dim - 1))
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -224,6 +224,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             # | aileron  | 0~74        | 1350~1980    | 75      | 1350 + 630*(action/74)  |
             # | rudder   | 0~85        | 1530~2000    | 86      | 1530 + 470*(action/85)  |
             # ----------------------------------------------------------------------
+            norm_act = self.custom_decode_discrete_actions(norm_act)
         return norm_act
 
     @property

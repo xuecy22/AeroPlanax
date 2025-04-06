@@ -50,7 +50,7 @@ class HeadingTaskParams(EnvParams):
     num_allies: int = 1
     num_enemies: int = 0
     num_missiles: int = 0
-    agent_type: int = 0
+    agent_type: int = 1   # 0: fighterplane, 1: canardplane
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     max_altitude: float = 9000
     min_altitude: float = 4200
@@ -183,7 +183,9 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         vt = state.plane_state.vt
         alpha = state.plane_state.alpha
         beta = state.plane_state.beta
-        P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
+        P = state.plane_state.dynamics.motionState.angularSpeed_Body[:, 0]  # shape (num_agents,)
+        Q = state.plane_state.dynamics.motionState.angularSpeed_Body[:, 1]
+        R = state.plane_state.dynamics.motionState.angularSpeed_Body[:, 2]
 
         norm_delta_altitude = (altitude - state.target_altitude) / 1000
         norm_delta_heading = wrap_PI((yaw - state.target_heading))

@@ -44,7 +44,8 @@ def check_collision(state: BasePlaneState, agent_id, R=50):
 #     )
 #     return done
 def check_extreme_state(state: BasePlaneState, agent_id, rotation_limit=1000.0):
-    P, Q, R = state.P[agent_id], state.Q[agent_id], state.R[agent_id]
+    # P, Q, R = state.P[agent_id], state.Q[agent_id], state.R[agent_id]
+    P, Q, R = state.dynamics.motionState.angularSpeed_Body[agent_id, 0], state.dynamics.motionState.angularSpeed_Body[agent_id, 1], state.dynamics.motionState.angularSpeed_Body[agent_id, 2]
     done = jnp.sqrt(P**2 + Q**2 + R**2) > rotation_limit
     return done
 
