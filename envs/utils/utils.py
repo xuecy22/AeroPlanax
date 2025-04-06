@@ -123,8 +123,8 @@ def ecef_to_geodetic(x, y, z):
     zo = (b2 * z) / (a * V) 
     height = U * (1 - b2 / (a * V)) 
     lat = jnp.atan((z + ep * ep *zo) / r) 
-    temp = jnp.atan(y / x) 
-    if x >=0 :    
+    temp = jnp.atan(y / x)
+    if x >= 0 :    
         long = temp 
     elif (x < 0) & (y >= 0):
         long = pi + temp 

@@ -369,28 +369,41 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         with open(self.filename, mode='a', encoding='utf-8') as f:
             timestamp = state.time * params.agent_interaction_steps / params.sim_freq
             f.write(f"#{timestamp[0]:.2f}\n")
-            for i in range(self.num_agents):
-                npos = state.plane_state.north[i]
-                epos = state.plane_state.east[i]
-                alt = state.plane_state.altitude[i]
-                roll = state.plane_state.roll[i] * 180 / jnp.pi
-                pitch = state.plane_state.pitch[i] * 180 / jnp.pi
-                yaw = state.plane_state.yaw[i] * 180 / jnp.pi
+            for i in range(self.num_allies):
+                npos = state.plane_state.north[0][i]
+                epos = state.plane_state.east[0][i]
+                alt = state.plane_state.altitude[0][i]
+                roll = state.plane_state.roll[0][i] * 180 / jnp.pi
+                pitch = state.plane_state.pitch[0][i] * 180 / jnp.pi
+                yaw = state.plane_state.yaw[0][i] * 180 / jnp.pi
                 lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
-                log_msg = f"{100 + i},T={lon[0]}|{lat[0]}|{alt[0]}|{roll[0]}|{pitch[0]}|{yaw[0]},"
+                log_msg = f"{100 + i},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
                 log_msg += f"Name=F16,"
                 log_msg += f"Color=Red"
                 if log_msg is not None:
                     f.write(log_msg + "\n")
-            for i in range(self.num_missiles):
-                npos = state.missile_state.north[i]
-                epos = state.missile_state.east[i]
-                alt = state.missile_state.altitude[i]
-                roll = state.missile_state.roll[i] * 180 / jnp.pi
-                pitch = state.missile_state.pitch[i] * 180 / jnp.pi
-                yaw = state.missile_state.yaw[i] * 180 / jnp.pi
+            for i in range(self.num_allies, self.num_agents):
+                npos = state.plane_state.north[0][i]
+                epos = state.plane_state.east[0][i]
+                alt = state.plane_state.altitude[0][i]
+                roll = state.plane_state.roll[0][i] * 180 / jnp.pi
+                pitch = state.plane_state.pitch[0][i] * 180 / jnp.pi
+                yaw = state.plane_state.yaw[0][i] * 180 / jnp.pi
                 lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
-                log_msg = f"{100 + self.num_agents + i},T={lon[0]}|{lat[0]}|{alt[0]}|{roll[0]}|{pitch[0]}|{yaw[0]},"
+                log_msg = f"{100 + i},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
+                log_msg += f"Name=F16,"
+                log_msg += f"Color=Blue"
+                if log_msg is not None:
+                    f.write(log_msg + "\n")
+            for i in range(self.num_missiles):
+                npos = state.missile_state.north[0][i]
+                epos = state.missile_state.east[0][i]
+                alt = state.missile_state.altitude[0][i]
+                roll = state.missile_state.roll[0][i] * 180 / jnp.pi
+                pitch = state.missile_state.pitch[0][i] * 180 / jnp.pi
+                yaw = state.missile_state.yaw[0][i] * 180 / jnp.pi
+                lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
+                log_msg = f"{100 + self.num_agents + i},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
                 log_msg += f"Name=AIM-9L,"
                 log_msg += f"Color=Blue"
                 if log_msg is not None:

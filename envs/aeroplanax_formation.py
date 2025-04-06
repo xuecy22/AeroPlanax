@@ -205,7 +205,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             team_positions = wedge_formation(self.num_allies, params.team_spacing)
         elif self.formation_type == 1:
             team_positions = line_formation(self.num_allies, params.team_spacing)
-        elif self.formation_type == 1:
+        elif self.formation_type == 2:
             team_positions = diamond_formation(self.num_allies, params.team_spacing)
         else:
             raise ValueError("Provided formation type is not valid")
