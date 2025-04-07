@@ -134,93 +134,108 @@ class CanardPlaneState(BasePlaneState):
     ay: float = 0.0
     az: float = 0.0
 
-def createPlane(latitude=31.835, longitude=117.089, altitude=31.0,
-                roll=0.0, pitch=0.0, yaw=0.0,
-                velNED=jnp.zeros(3, dtype=float),
-                angVel=jnp.zeros(3, dtype=float),
-                accelNED=jnp.zeros(3, dtype=float),
-                fuelVolume=-1,
-                CSD=jnp.zeros(6, dtype=float)
-                ):
-    ''' dynamic model initialization. Initial LLA is set to be the origin of NED frame.
-    Args:
-        latitude (float, optional): 纬度, unit in degree. Defaults to 31.835.
-        longitude (float, optional): 经度, unit in degree. Defaults to 117.089.
-        altitude (float, optional): Mean Sea Level, unit in meter. Defaults to 31.0.
-        roll (float, optional): 滚转角, unit in degree. Defaults to 0.
-        pitch (float, optional): 俯仰角, unit in degree. Defaults to 0.
-        yaw (float, optional): 偏航角, unit in degree. Defaults to 0.
-        velNED (jnp.array (3,), optional): NED系速度, unit in m/s. Defaults to jnp.zeros(3).
-        angVel (jnp.array (3,), optional): Body系角速度, unit in deg/s. Defaults to jnp.zeros(3).
-        accelNED (jnp.array (3,), optional): NED系加速度, unit in m/s^2. Defaults to jnp.zeros(3).
-        fuelVolume (float, optional): 燃油体积, unit in liter. Defaults to full fuel capacity.
-    '''
-    planeParams = jax.lax.cond(fuelVolume > 0,
-                               lambda: plane_params.createPlaneParams(fuelVolume),
-                               lambda: plane_params.createPlaneParams())
-    # Initialize the position of the UAV, set the origin of the NED frame to the initial position
-    positionLLA = position_LLA.createPositionLLA(latitude, longitude, altitude)
 
-    # Initialize the UAV mostion state
-    init_mstate = fdm6DOF.createMotionState()
-    C_NED2Body = att.Eular2DCM_NED2Body(roll, pitch, yaw)
-    qNED2Body = att.attitude_deg_to_quaternion(roll, pitch, yaw)
-    qNED2Body = qNED2Body.at[1:].set(-qNED2Body[1:])
-    init_mstate = init_mstate.replace(
-        quaternion_Body2NED=qNED2Body,
-        velocity_Body=C_NED2Body @ velNED,
-        angularSpeed_Body=jnp.radians(angVel),
-        accel_Body=C_NED2Body @ accelNED
-    )
+def createPlane(latitude=0.0, longitude=0.0, altitude=0.0,
+                    roll=0.0, pitch=0.0, yaw=0.0,
+                    velNED=jnp.zeros(3, dtype=float),
+                    angVel=jnp.zeros(3, dtype=float),
+                    accelNED=jnp.zeros(3, dtype=float),
+                    fuelVolume=-1,
+                    CSD=jnp.zeros(6, dtype=float)
+                    ):
+        ''' dynamic model initialization. Initial LLA is set to be the origin of NED frame.
+        Args:
+            latitude (float, optional): 纬度, unit in degree. Defaults to 31.835.
+            longitude (float, optional): 经度, unit in degree. Defaults to 117.089.
+            altitude (float, optional): Mean Sea Level, unit in meter. Defaults to 31.0.
+            roll (float, optional): 滚转角, unit in degree. Defaults to 0.
+            pitch (float, optional): 俯仰角, unit in degree. Defaults to 0.
+            yaw (float, optional): 偏航角, unit in degree. Defaults to 0.
+            velNED (jnp.array (3,), optional): NED系速度, unit in m/s. Defaults to jnp.zeros(3).
+            angVel (jnp.array (3,), optional): Body系角速度, unit in deg/s. Defaults to jnp.zeros(3).
+            accelNED (jnp.array (3,), optional): NED系加速度, unit in m/s^2. Defaults to jnp.zeros(3).
+            fuelVolume (float, optional): 燃油体积, unit in liter. Defaults to full fuel capacity.
+        '''
+        planeParams = jax.lax.cond(fuelVolume > 0,
+                                   lambda: plane_params.createPlaneParams(fuelVolume),
+                                   lambda: plane_params.createPlaneParams())
+        # Initialize the position of the UAV, set the origin of the NED frame to the initial position
+        positionLLA = position_LLA.createPositionLLA(latitude, longitude, altitude)
 
-    dynamics = fdm6DOF.createFDM6DOF(state0=init_mstate, airframe=planeParams)
+        # Initialize the UAV mostion state
+        init_mstate = fdm6DOF.createMotionState()
+        C_NED2Body = att.Eular2DCM_NED2Body(roll, pitch, yaw)
+        qNED2Body = att.attitude_deg_to_quaternion(roll, pitch, yaw)
+        qNED2Body = qNED2Body.at[1:].set(-qNED2Body[1:])
+        init_mstate = init_mstate.replace(
+            quaternion_Body2NED=qNED2Body,
+            velocity_Body=C_NED2Body @ velNED,
+            angularSpeed_Body=jnp.radians(angVel),
+            accel_Body=C_NED2Body @ accelNED
+        )
 
-    # Environment static temperature
-    Ts, rho, Ps = ISA(positionLLA.Altitude)
-    # Initialize airdata
-    Wind = wind_sim.createwindSim(jnp.array([200, 200, 50]), jnp.array([1.06, 1.06, 0.7]), jnp.array([0.0, 0.0, 0.0]))
-    VwindBody = wind_sim.getWindBody(Wind, roll, pitch, yaw)
+        dynamics = fdm6DOF.createFDM6DOF(state0=init_mstate, airframe=planeParams)
 
-    VaBody = jnp.zeros_like(VwindBody)
-    alpha = 0.0
-    beta = 0.0
-    VTAS = 0.0  # 空速标量
-    VIAS = 0.0
-    mach = 0.0
-    dynamicPressure = 0.0
-    alphadot = 0.0
-    betadot = 0.0
-
-    controlInputPWM = createInputChannels()
-    controlSurface = control_surface.createControlSurface(delta=CSD)
-    engine = turbo_engineSW190B.createTurboEngineSW190B(controlInputPWM.Throttle,
-                                                        pos=jnp.array([-2.53, 0, 0]), azimuth=0, elevation=0)
-    state = CanardPlaneState(
-        planeParams=planeParams,
-        positionLLA=positionLLA,
-        # Initialize attitude RPY
-        roll=roll,
-        pitch=pitch,
-        yaw=yaw,
-        dynamics=dynamics,
+        # Environment static temperature
+        Ts, rho, Ps = ISA(positionLLA.Altitude)
         # Initialize airdata
-        Wind=Wind,
-        VwindBody=VwindBody,
-        VaBody=VaBody,
-        alpha=alpha,
-        beta=beta,
-        VTAS=VTAS,
-        VIAS=VIAS,
-        mach=mach,
-        dynamicPressure=dynamicPressure,
-        alphadot=alphadot,
-        betadot=betadot,
-        controlInputPWM=controlInputPWM,
-        controlSurface=controlSurface,
-        engine=engine
-    )
-    state = update_air_data(state, rho, Ts)
-    return state
+        Wind = wind_sim.createwindSim(jnp.array([200, 200, 50]), jnp.array([1.06, 1.06, 0.7]), jnp.array([0.0, 0.0, 0.0]))
+        VwindBody = wind_sim.getWindBody(Wind, roll, pitch, yaw)
+
+        VaBody = jnp.zeros_like(VwindBody)
+        alpha = 0.0
+        beta = 0.0
+        VTAS = 0.0  # 空速
+        VIAS = 0.0
+        mach = 0.0
+        dynamicPressure = 0.0
+        alphadot = 0.0
+        betadot = 0.0
+
+        controlInputPWM = createInputChannels()
+        controlSurface = control_surface.createControlSurface(delta=CSD)
+        engine = turbo_engineSW190B.createTurboEngineSW190B(controlInputPWM.Throttle,
+                                                            pos=jnp.array([-2.53, 0, 0]), azimuth=0, elevation=0)
+        state = CanardPlaneState(
+            north=positionLLA.x,
+            east=positionLLA.y,
+            altitude=positionLLA.Altitude,
+            roll=roll*jnp.pi/180.0, # 转换为弧度存储
+            pitch=pitch*jnp.pi/180.0,
+            yaw=yaw*jnp.pi/180.0,
+            vel_x=dynamics.motionState.velocity_Body[0],
+            vel_y=dynamics.motionState.velocity_Body[1],
+            vel_z=dynamics.motionState.velocity_Body[2],
+            vt=VTAS,
+            q0=dynamics.motionState.quaternion_Body2NED[0],
+            q1=dynamics.motionState.quaternion_Body2NED[1],
+            q2=dynamics.motionState.quaternion_Body2NED[2],
+            q3=dynamics.motionState.quaternion_Body2NED[3],
+            planeParams=planeParams,
+            positionLLA=positionLLA,
+            # Initialize attitude RPY
+            # roll=roll,
+            # pitch=pitch,
+            # yaw=yaw,
+            dynamics=dynamics,
+            # Initialize airdata
+            Wind=Wind,
+            VwindBody=VwindBody,
+            VaBody=VaBody,
+            alpha=alpha,
+            beta=beta,
+            VTAS=VTAS,
+            VIAS=VIAS,
+            mach=mach,
+            dynamicPressure=dynamicPressure,
+            alphadot=alphadot,
+            betadot=betadot,
+            controlInputPWM=controlInputPWM,
+            controlSurface=controlSurface,
+            engine=engine
+        )
+        state = update_air_data(state, rho, Ts)
+        return state
 
 def update(state, cmdInput, deltaT):
 
@@ -284,13 +299,34 @@ def update(state, cmdInput, deltaT):
                                          dynamics.motionState.position_NED[1],
                                          dynamics.motionState.position_NED[2])
     state = state.replace(
+        north=positionLLA.x, # 米
+        east=positionLLA.y, # 米
+        altitude=positionLLA.Altitude, # 米
+        roll=roll*jnp.pi/180.0, # 转换为弧度存储
+        pitch=pitch*jnp.pi/180.0,
+        yaw=yaw*jnp.pi/180.0,
+        vel_x=dynamics.motionState.velocity_Body[0], # 米/秒
+        vel_y=dynamics.motionState.velocity_Body[1], # 米/秒
+        vel_z=dynamics.motionState.velocity_Body[2], # 米/秒
+        vt=state.VTAS, # 米/秒
+        q0=dynamics.motionState.quaternion_Body2NED[0],
+        q1=dynamics.motionState.quaternion_Body2NED[1],
+        q2=dynamics.motionState.quaternion_Body2NED[2],
+        q3=dynamics.motionState.quaternion_Body2NED[3],
         planeParams=planeParams,
         positionLLA=positionLLA,
-        # Initialize attitude RPY
-        roll=roll,
-        pitch=pitch,
-        yaw=yaw,
         dynamics=dynamics,
+        Wind=state.Wind,
+        VwindBody=state.VwindBody,
+        VaBody=state.VaBody,
+        alpha=state.alpha, # 弧度存储
+        beta=state.beta, # 弧度存储
+        VTAS=state.VTAS,
+        VIAS=state.VIAS,
+        mach=state.mach,
+        dynamicPressure=state.dynamicPressure,
+        alphadot=state.alphadot,
+        betadot=state.betadot,
         ax=accel_b[0] / 9.81, # 因为accel_b是机体系下的加速度(单位是m/s^2)，所以要除以9.81，转化成三轴过载
         ay=accel_b[1] / 9.81,
         az=accel_b[2] / 9.81,

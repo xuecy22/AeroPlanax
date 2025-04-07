@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -500,7 +500,7 @@ config = {
     "NUM_ENVS": 500,
     "NUM_ACTORS": 1,
     "NUM_STEPS": 1500,
-    "TOTAL_TIMESTEPS": 3e9,
+    "TOTAL_TIMESTEPS": 1e9,
     "FC_DIM_SIZE": 256,
     "GRU_HIDDEN_DIM": 256,
     "UPDATE_EPOCHS": 16,
