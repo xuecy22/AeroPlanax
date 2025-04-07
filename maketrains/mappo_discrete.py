@@ -1,28 +1,27 @@
 import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
-
 import jax
-import wandb
-import jax.numpy as jnp
-import numpy as np
-import matplotlib.pyplot as plt
-from pathlib import Path
-from datetime import datetime
 import optax
-from typing import NamedTuple
-from flax.training.train_state import TrainState
+import numpy as np
 import tensorboardX
 import jax.experimental
-from envs.wrappers import LogWrapper
-from envs.aeroplanax_formation_closest import AeroPlanaxFormationEnv, FormationTaskParams
+import jax.numpy as jnp
 import orbax.checkpoint as ocp
+
+from typing import Dict, Any
+from typing import NamedTuple
+from envs.wrappers import LogWrapper
+from flax.training.train_state import TrainState
 
 from networks import (
     MAPPO_DISCRETE_DEFAULT_DIMS as DEFAULT_DIMS,
     MAPPOActorDiscrete as Actor,
     MAPPOCritic as Critic,
     ScannedRNN
+)
+
+from maketrains.utils import (
+    batchify,
+    unbatchify
 )
 
 class Transition(NamedTuple):
@@ -36,19 +35,9 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def batchify(x: dict, agent_list, num_envs, num_actors):
-    x = jnp.stack([x[a] for a in agent_list])
-    # print('batchify', x.shape)
-    return x.reshape((num_actors * num_envs, -1))
-
-
-def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
-    x = x.reshape((num_actors, num_envs, -1))
-    return {a: x[i] for i, a in enumerate(agent_list)}
-
 def make_train(config):
-    env_params = FormationTaskParams()
-    env = AeroPlanaxFormationEnv(env_params)
+    env_params = config["TYPE_ENV_PARAMS"]()
+    env = config["TYPE_ENV"](env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config["NUM_UPDATES"] = (
@@ -483,7 +472,8 @@ def make_train(config):
                 jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1    
             runner_state = (train_states, env_state, last_obs, last_global_obs, last_done, hstates, rng)
-            return (runner_state, update_steps), metric
+            return (runner_state, update_steps), None
+            # return (runner_state, update_steps), metric
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -495,86 +485,27 @@ def make_train(config):
             (ac_init_hstate, cr_init_hstate),
             _rng,
         )
-        runner_state, metric = jax.lax.scan(
+        # runner_state, metric = jax.lax.scan(
+        runner_state, _ = jax.lax.scan(
             _update_step, (runner_state, start_epoch), None, config["NUM_UPDATES"]
         )
-        return {"runner_state": runner_state, "metric": metric}
+        return {"runner_state": runner_state}
+        # return {"runner_state": runner_state, "metric": metric}
 
     return train
 
 
-str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
-config = {
-    "GROUP": "formation",
-    "SEED": 42,
-    "LR": 3e-4,
-    "NUM_ENVS": 10,
-    "NUM_ACTORS": 2,
-    "NUM_STEPS": 100,
-    "TOTAL_TIMESTEPS": 1e4,
-    "FC_DIM_SIZE": 128,
-    "GRU_HIDDEN_DIM": 128,
-    "UPDATE_EPOCHS": 16,
-    "NUM_MINIBATCHES": 5,
-    "GAMMA": 0.99,
-    "GAE_LAMBDA": 0.95,
-    "CLIP_EPS": 0.2,
-    "ENT_COEF": 1e-3,
-    "VF_COEF": 1,
-    "MAX_GRAD_NORM": 2,
-    "ACTIVATION": "relu",
-    "ANNEAL_LR": False,
-    "DEBUG": True,
-    "OUTPUTDIR": "results/" + str_date_time,
-    "LOGDIR": "results/" + str_date_time + "/logs",
-    "SAVEDIR": "results/" + str_date_time + "/checkpoints",
-    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-01-26-04-39/checkpoints/checkpoint_epoch_1" 
-}
+def save_train(out: Dict[str, Any], save_dir: str):
+    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+    checkpoint = {
+        "actor_params": out['runner_state'][0][0][0].params,
+        "actor_opt_state": out['runner_state'][0][0][0].opt_state,
+        "critic_params": out['runner_state'][0][0][1].params,
+        "critic_opt_state": out['runner_state'][0][0][1].opt_state,
+        "epoch": jnp.array(out['runner_state'][1])
+    }
+    checkpoint_path = os.path.abspath(os.path.join(save_dir, f"checkpoint_epoch_{out['runner_state'][1]}"))
+    ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
+    ckptr.wait_until_finished()
 
-seed = config['SEED']
-wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
-wandb.init(
-    # set the wandb project where this run will be logged
-    project="AeroPlanax",
-    # track hyperparameters and run metadata
-    config=config,
-    name=f'seed_{seed}',
-    group=config['GROUP'],
-    notes='form',
-    # dir=config['LOGDIR'],
-    reinit=True,
-)
-
-output_dir = config["OUTPUTDIR"]
-Path(output_dir).mkdir(parents=True, exist_ok=True)
-save_dir = config["SAVEDIR"]
-Path(save_dir).mkdir(parents=True, exist_ok=True)
-
-rng = jax.random.PRNGKey(seed)
-train_jit = jax.jit(make_train(config))
-out = train_jit(rng)
-wandb.finish()
-
-ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-checkpoint = {
-    "actor_params": out['runner_state'][0][0][0].params,
-    "actor_opt_state": out['runner_state'][0][0][0].opt_state,
-    "critic_params": out['runner_state'][0][0][1].params,
-    "critic_opt_state": out['runner_state'][0][0][1].opt_state,
-    "epoch": jnp.array(out['runner_state'][1])
-}
-checkpoint_path = os.path.abspath(os.path.join(config["SAVEDIR"], f"checkpoint_epoch_{out['runner_state'][1]}"))
-ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
-ckptr.wait_until_finished()
-
-print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
-
-plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
-plt.xlabel("Update Step")
-plt.ylabel("Return")
-plt.savefig(output_dir + '/returned_episode_returns.png')
-plt.cla()
-plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
-plt.xlabel("Update Step")
-plt.ylabel("Return")
-plt.savefig(output_dir + '/returned_episode_lengths.png')
+    print(f"Checkpoint saved at epoch {out['runner_state'][1]}")

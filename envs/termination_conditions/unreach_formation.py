@@ -10,7 +10,7 @@ def unreach_formation_fn(
     state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
-    max_check_interval: int = 100,
+    max_check_interval: int = 200,
     min_check_interval: int = 2
 ) -> Tuple[bool, bool]:
     """

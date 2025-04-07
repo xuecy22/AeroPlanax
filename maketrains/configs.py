@@ -1,0 +1,48 @@
+'''
+预设config，缺少
+ - GROUP
+ - OUTPUTDIR
+ - LOGDIR
+ - SAVEDIR
+ - LOADDIR(可选)
+'''
+
+BASE_CONFIG = {
+    "LR": 3e-4,
+    "NUM_ACTORS": 2,
+    "FC_DIM_SIZE": 128,
+    "GRU_HIDDEN_DIM": 128,
+    "UPDATE_EPOCHS": 16,
+    "NUM_MINIBATCHES": 5,
+    "GAMMA": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 1e-3,
+    "VF_COEF": 1,
+    "MAX_GRAD_NORM": 2,
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": False,
+    "DEBUG": True,
+}
+
+_MINI_CONFIG = {
+    "NUM_ENVS": 10,
+    "NUM_STEPS": 100,
+    "TOTAL_TIMESTEPS": 1e4,
+}
+
+_MEDIUM_CONFIG = {
+    "NUM_ENVS": 1000,
+    "NUM_STEPS": 2000,
+    "TOTAL_TIMESTEPS": 2e8,
+}
+
+_HUGE_CONFIG = {
+    "NUM_ENVS": 1000,
+    "NUM_STEPS": 4000,
+    "TOTAL_TIMESTEPS": 2e9,
+}
+
+MINI_CONFIG = BASE_CONFIG | _MINI_CONFIG
+MEDIUM_CONFIG = BASE_CONFIG | _MEDIUM_CONFIG
+HUGE_CONFIG = BASE_CONFIG | _HUGE_CONFIG
