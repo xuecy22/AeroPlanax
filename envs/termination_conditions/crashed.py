@@ -15,5 +15,11 @@ def crashed_fn(
     """
     plane_state: FighterPlaneState = state.plane_state
     done = plane_state.is_crashed[agent_id]
+    # _ = jax.lax.cond(
+    #     done,
+    #     lambda _: jax.debug.print("Terminated by crashed_fn: done={done} (agent {agent})", done=done, agent=agent_id),
+    #     lambda _: None,
+    #     operand=None,
+    # )
     success = False
     return done, success

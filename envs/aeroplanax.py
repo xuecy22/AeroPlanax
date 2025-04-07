@@ -290,9 +290,19 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         obs_st = self._get_obs(state_st, params)
 
         state_st, dones = self.get_termination(state_st, params)
-        dones["__all__"] = state_st.done
-        rewards = self.get_reward(state_st, params)
+        dones["__all__"] = state_st.done # 将state_st.done（环境级别的全局终止标志）存入字典的特殊键__all__，这个标志表示整个环境是否需要重置（例如所有飞机都终止/任务超时）
+        rewards = self.get_reward(state_st, params) # 调用get_reward方法，根据当前状态计算每个智能体的即时奖励，奖励可能来自多个奖励函数的组合（如存活奖励、击中奖励等），返回字典类型，包含每个智能体的奖励值（如 {"ally_0": 1.5, "enemy_0": -0.5}）
         info = {"success": state_st.success}
+        # 创建包含额外调试信息的字典info
+        # state_st.success表示任务是否成功完成（不同于done，可能用于判断胜利条件）
+        # 这个信息字典通常用于训练监控或日志记录
+
+        # # 调试输出：打印环境步状态
+        # jax.debug.print("aeroplanax.py: EnvStep Debug: time={time}, rewards={rewards}, done_all={done_all}, success={success}",
+        #                 time=state_st.time,
+        #                 rewards=rewards,
+        #                 done_all=dones["__all__"],
+        #                 success=info["success"])
 
         key, key_step = jax.random.split(key)
         state_st, info = self._step_task(key_step, state_st, info, actions, params)
