@@ -34,6 +34,10 @@ class BasePlaneState:
         return self.status == AeroplaneStatus.ALIVE.value
     
     @property
+    def is_alive_or_locked(self):
+        return (self.status == AeroplaneStatus.ALIVE.value) | (self.status == AeroplaneStatus.LOCKED.value)
+    
+    @property
     def is_locked(self):
         return self.status == AeroplaneStatus.LOCKED.value
     

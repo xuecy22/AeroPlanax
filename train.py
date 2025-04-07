@@ -1,6 +1,7 @@
 import os
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 import jax
 import wandb
@@ -48,6 +49,8 @@ Path(save_dir).mkdir(parents=True, exist_ok=True)
 
 rng = jax.random.PRNGKey(config["SEED"])
 train_jit = jax.jit(make_train_mappo_discrete(config))
+print('jit ready!')
+
 out = train_jit(rng)
 wandb.finish()
 

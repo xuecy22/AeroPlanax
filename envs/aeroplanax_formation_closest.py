@@ -84,8 +84,8 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         }
 
         self.reward_functions = [
-            functools.partial(formation_reward_fn, reward_scale=1.0, valid_distance=100.0),
-            # functools.partial(event_driven_reward_fn, fail_reward=-10, success_reward=10),
+            functools.partial(formation_reward_fn, reward_scale=2.0, valid_distance=100.0),
+            functools.partial(event_driven_reward_fn, fail_reward=-10, success_reward=10),
         ]
 
         self.termination_conditions = [

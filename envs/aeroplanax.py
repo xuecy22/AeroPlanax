@@ -490,11 +490,16 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             successes = jnp.logical_or(successes, new_success)
             # TODO: early stop when all agents are done
         # modify state
-        state = state.replace(
-            plane_state=state.plane_state.replace(
-                status=jnp.where(successes, 4, state.plane_state.status)
-            )
-        )
+        '''
+        TODO: 或许应该废除
+        (1) success目前暂时(似乎)没有得到使用
+        (2) 多机环境中单架飞机的state设置为success不是很好的选择(Locked+Alive已经很烦人了)
+        '''
+        # state = state.replace(
+        #     plane_state=state.plane_state.replace(
+        #         status=jnp.where(successes, 4, state.plane_state.status)
+        #     )
+        # )
         state = state.replace(
             done=jnp.all(dones),
             success=jnp.all(successes)
