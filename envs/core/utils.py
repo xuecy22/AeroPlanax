@@ -26,6 +26,12 @@ def check_collision(state: BasePlaneState, agent_id, R=50):
 def check_extreme_state(state: BasePlaneState, agent_id, rotation_limit=1000.0):
     P, Q, R = state.P[agent_id], state.Q[agent_id], state.R[agent_id]
     done = jnp.sqrt(P**2 + Q**2 + R**2) > rotation_limit
+    # jack = jax.lax.cond(
+    #     done,
+    #     lambda _: jax.debug.print("Terminated by extreme_state_fn: done={done} (agent {agent})", done=done, agent=agent_id),
+    #     lambda _: None,
+    #     operand=None,
+    # )
     return done
 
 def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3):
@@ -54,6 +60,12 @@ def check_overload(state: BasePlaneState, agent_id, max_overload=10.0):
     mask2 = jnp.abs(state.ay[agent_id]) >= max_overload
     mask3 = jnp.abs(state.az[agent_id]) >= max_overload
     done = mask1 | mask2 | mask3
+    # jack = jax.lax.cond(
+    #     done,
+    #     lambda _: jax.debug.print("Terminated by overload_fn: done={done} (agent {agent})", done=done, agent=agent_id),
+    #     lambda _: None,
+    #     operand=None,
+    # )
     return done
 
 def check_crashed(state: BasePlaneState, agent_id):

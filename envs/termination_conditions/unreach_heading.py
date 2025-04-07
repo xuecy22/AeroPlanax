@@ -11,7 +11,7 @@ def unreach_heading_fn(
     state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
-    max_check_interval: int = 100,
+    max_check_interval: int = 50,
     min_check_interval: int = 2
 ) -> Tuple[bool, bool]:
     """
@@ -23,19 +23,20 @@ def unreach_heading_fn(
     vt = plane_state.vt[agent_id]
     check_time = state.time - state.last_check_time
     # 判断时间
-    max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps # 100*50/1=1500
-    min_check_interval = min_check_interval * params.sim_freq / params.agent_interaction_steps # 2*50/1=100
+    max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps # 50*50/10=250
+    min_check_interval = min_check_interval * params.sim_freq / params.agent_interaction_steps # 2*50/10=10
     mask1 = check_time <= max_check_interval
     mask2 = check_time >= min_check_interval
     # 判断是否到达target_heading
     mask3 = jnp.abs(wrap_PI(yaw - state.target_heading[agent_id])) < jnp.pi / 36 # jnp.pi / 18 = 0.174532925199
-    # 判断是否到达target_altitude
-    mask4 = jnp.abs(altitude - state.target_altitude[agent_id]) < 30
-    # 判断是否到达target_vt
-    mask5 = jnp.abs(vt - state.target_vt[agent_id]) < 10
+    # # 判断是否到达target_altitude
+    # mask4 = jnp.abs(altitude - state.target_altitude[agent_id]) < 30
+    # # 判断是否到达target_vt
+    # mask5 = jnp.abs(vt - state.target_vt[agent_id]) < 10
 
     # 当达到目标且时间符合要求时, 任务成功
-    success = mask1 & mask2 & mask3 & mask4 & mask5
+    # success = mask1 & mask2 & mask3 & mask4 & mask5
+    success = mask1 & mask2 & mask3
 
     # success = mask1 & mask3
     # 任务超时, 则任务结束

@@ -169,7 +169,7 @@ class AeroPlanaxSemicircleEnv(AeroPlanaxEnv[SemicircleTaskState, SemicircleTaskP
                 altitude=altitude,  # 初始高度
                 vt=vt
             ),
-            target_heading = state.plane_state.yaw,  # 初始目标航向=当前航向 + heading_increment
+            target_heading = state.plane_state.yaw,  # 初始目标航向=当前航向
             target_altitude = target_altitude, # 目标高度 = fixed_altitude
             target_vt = target_vt,          # 目标速度 = fixed_speed
             heading_turn_counts = jnp.zeros(self.num_agents, dtype=jnp.int32)                  # 重置航向转动计数器
