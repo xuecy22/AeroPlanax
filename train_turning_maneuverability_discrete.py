@@ -19,8 +19,9 @@ import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
-from envs.aeroplanax_semicircle import AeroPlanaxSemicircleEnv, SemicircleTaskParams
+# from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
+# from envs.aeroplanax_semicircle import AeroPlanaxSemicircleEnv, SemicircleTaskParams
+from envs.aeroplanax_turning_maneuverability_test import AeroPlanax_turning_maneuverability_Env, turning_maneuverability_TaskParams
 import orbax.checkpoint as ocp
 
 
@@ -124,8 +125,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env_params = SemicircleTaskParams()
-    env = AeroPlanaxSemicircleEnv(env_params)
+    env_params = turning_maneuverability_TaskParams()
+    env = AeroPlanax_turning_maneuverability_Env(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config["NUM_UPDATES"] = (
@@ -464,11 +465,15 @@ def make_train(config):
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/success_times', metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(), env_steps)
-                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessTimes={:.3f}".format(
+                    writer.add_scalar('eval/target_heading_max', metric["target_heading"][metric["returned_episode"].squeeze()].max(), env_steps)
+                    writer.add_scalar('eval/target_heading_min', metric["target_heading"][metric["returned_episode"].squeeze()].min(), env_steps)
+                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessTimes={:.3f} TargetHeading_max={:.3f} TargetHeading_min={:.3f}".format(
                         metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
                         metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(),
+                        metric["target_heading"][metric["returned_episode"].squeeze()].max(),
+                        metric["target_heading"][metric["returned_episode"].squeeze()].min(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1    
@@ -494,13 +499,13 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "semicircle",
+    "GROUP": "turning_maneuverability(max_check_interval=50, min_check_interval=0.2, test the max turn counts in 50 s)",
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 300,
     "NUM_ACTORS": 1,
     "NUM_STEPS": 1000,
-    "TOTAL_TIMESTEPS": 3e8,
+    "TOTAL_TIMESTEPS": 1e8,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -517,7 +522,7 @@ config = {
     "OUTPUTDIR": "results/" + str_date_time,
     "LOGDIR": "results/" + str_date_time + "/logs",
     "SAVEDIR": "results/" + str_date_time + "/checkpoints",
-    # "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-06-14-42/checkpoints/checkpoint_epoch_1111" 
+    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-06-14-42/checkpoints/checkpoint_epoch_1111" # baseline策略 (heading) 
 }
 
 seed = config['SEED']

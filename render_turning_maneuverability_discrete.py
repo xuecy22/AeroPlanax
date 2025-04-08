@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -17,9 +17,7 @@ from flax.training.train_state import TrainState
 import distrax
 import optax
 from envs.wrappers import LogWrapper
-# from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
-from envs.aeroplanax_semicircle import AeroPlanaxSemicircleEnv, SemicircleTaskParams
-# from envs.aeroplanax_combat_with_missile import AeroPlanaxCombatwithMissileEnv, CombatwithMissileTaskParams
+from envs.aeroplanax_turning_maneuverability_test import AeroPlanax_turning_maneuverability_Env, turning_maneuverability_TaskParams
 import orbax.checkpoint as ocp
 
 
@@ -128,8 +126,8 @@ def test(config, rng):
         )
         return config["LR"] * frac
     # init env
-    env_params = SemicircleTaskParams()
-    env = AeroPlanaxSemicircleEnv(env_params)
+    env_params = turning_maneuverability_TaskParams()
+    env = AeroPlanax_turning_maneuverability_Env(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
 
@@ -235,7 +233,7 @@ def test(config, rng):
         init_hstate,
         _rng,
     )
-    for _ in range(2000):
+    for _ in range(1000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
         success_times = traj_batch.info['heading_turn_counts']
@@ -261,7 +259,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-07-14-14/checkpoints/checkpoint_epoch_3333" 
+    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-07-16-47/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)
