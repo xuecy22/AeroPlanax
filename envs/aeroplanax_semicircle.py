@@ -78,6 +78,19 @@ class SemicircleTaskParams(EnvParams):
     # # 定义完成半圆所需的总步数
     total_turn_steps: int = 6
     heading_increment: float = jnp.pi / total_turn_steps
+    # ############################################################################
+    # # 创建课程学习角度序列
+    # # 使用指数增长分布，保证总和为π(180°)
+    # increment_factors = jnp.array([
+    #     0.25, 0.3, 0.35, 0.4, 0.45,  # 开始较小角度(约2.5°-4.5°)
+    #     0.5, 0.55, 0.6, 0.65, 0.7,   # 中等角度(约5°-7°)
+    #     0.75, 0.8, 0.85, 0.9, 0.95,  # 较大角度(约7.5°-9.5°)
+    #     1.0, 1.05, 1.1               # 最大角度(约10°-11°)
+    # ])
+
+    # # 归一化确保总和为π
+    # heading_increments: jnp.ndarray = increment_factors * (jnp.pi / jnp.sum(increment_factors))
+    # ############################################################################
 
 
 class AeroPlanaxSemicircleEnv(AeroPlanaxEnv[SemicircleTaskState, SemicircleTaskParams]):
@@ -206,13 +219,21 @@ class AeroPlanaxSemicircleEnv(AeroPlanaxEnv[SemicircleTaskState, SemicircleTaskP
         # target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
 
         #################################################################################################################
-
+        # ##########################################################
+        # # 课程学习：
+        # current_increment = jnp.take(
+        #     params.heading_increments, 
+        #     jnp.minimum(state.heading_turn_counts, params.total_turn_steps-1), 
+        #     axis=0
+        # )
+        # ##########################################################
         new_target_heading = jax.lax.cond(
             jnp.squeeze(jnp.logical_and(
                 state.heading_turn_counts < params.total_turn_steps,
                 state.plane_state.is_success
             )), # 使用 jnp.squeeze 将布尔数组转换为标量
             lambda: wrap_PI(state.target_heading + params.heading_increment), # 如果还未完成半圆转动，则更新目标航向
+            # lambda: wrap_PI(state.target_heading + current_increment), # 如果还未完成半圆转动，则更新目标航向
             lambda: state.target_heading  # 完成转动后保持不变
         )
         # # 调试输出：打印时间、航向转动计数器、当前 yaw 与新目标航向
