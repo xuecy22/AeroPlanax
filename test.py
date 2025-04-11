@@ -1,26 +1,68 @@
 import os
-os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+# os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 import jax
-from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
+import wandb
+from pathlib import Path
+from datetime import datetime
 
-key = jax.random.PRNGKey(0)
+from maketrains import (
+    make_train_mappo_discrete_eval,
+    MICRO_CONFIG,
+    MINI_CONFIG,
+    MEDIUM_CONFIG,
+)
+from envs.aeroplanax_formation_closest import AeroPlanaxFormationEnv, FormationTaskParams
 
-# Instantiate the environment & its settings.
-env_params = CombatTaskParams()
-env = AeroPlanaxCombatEnv(env_params)
+str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
+config = {
+    "SEED": 42,
+    "GROUP": "formation",
+    "TYPE_ENV_PARAMS": FormationTaskParams,
+    "TYPE_ENV": AeroPlanaxFormationEnv,
+    "OUTPUTDIR": "results/" + str_date_time,
+    "LOGDIR": "results/" + str_date_time + "/logs",
+    "SAVEDIR": "results/" + str_date_time + "/checkpoints",
+    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\baselines\\form_2" 
+}
+config = config | MINI_CONFIG
 
-# Reset the environment.
-key, key_reset = jax.random.split(key)
-obs, state = env.reset(key_reset, env_params)
+wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
+wandb.init(
+    # set the wandb project where this run will be logged
+    project="AeroPlanax",
+    # track hyperparameters and run metadata
+    config=config,
+    name=f'seed_{config["SEED"]}',
+    group=config['GROUP'],
+    notes='form',
+    # dir=config['LOGDIR'],
+    reinit=True,
+)
 
-# Sample a random action.
-for i in range(100):
-    key, key_act, key_step = jax.random.split(key, 3)
-    key_act = jax.random.split(key_act, env.num_agents)
-    actions = {
-        agent: env.action_space(agent, env_params).sample(key_act[i])
-        for i, agent in enumerate(env.agents)
-    }
-    obs, state, reward, done, _ = env.step(key_step, state, actions, env_params)
-    print(f'Time: {state.time}, Done: {done}, Reward: {reward}')
+output_dir = config["OUTPUTDIR"]
+Path(output_dir).mkdir(parents=True, exist_ok=True)
+save_dir = config["SAVEDIR"]
+Path(save_dir).mkdir(parents=True, exist_ok=True)
+
+rng = jax.random.PRNGKey(config["SEED"])
+train_jit = jax.jit(make_train_mappo_discrete_eval(config))
+print('jit ready!')
+
+out = train_jit(rng)
+wandb.finish()
+
+
+
+# import matplotlib.pyplot as plt
+# plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
+# plt.xlabel("Update Step")
+# plt.ylabel("Return")
+# plt.savefig(output_dir + '/returned_episode_returns.png')
+# plt.cla()
+# plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
+# plt.xlabel("Update Step")
+# plt.ylabel("Return")
+# plt.savefig(output_dir + '/returned_episode_lengths.png')

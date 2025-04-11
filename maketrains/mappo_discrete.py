@@ -7,7 +7,7 @@ import jax.experimental
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
 
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 from typing import NamedTuple
 from envs.wrappers_mul import LogWrapper
 from flax.training.train_state import TrainState
@@ -32,7 +32,7 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     world_state: jnp.ndarray
-    alive_mask: jnp.ndarray
+    valid_action: jnp.ndarray # last_done(此时的Transition.done)和curr_done都为True时，才为False
     info: jnp.ndarray
 
 
@@ -192,7 +192,7 @@ def make_train(config):
             runner_state, update_steps = update_runner_state
 
             def _env_step(runner_state, unused):
-                train_states, env_state, last_obs, last_global_obs, last_alive_mask, last_done, hstates, rng = runner_state
+                train_states, env_state, last_obs, last_global_obs, last_done, hstates, rng = runner_state
 
                 # SELECT ACTION
                 ac_in = (
@@ -242,7 +242,7 @@ def make_train(config):
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, alive_mask, info = jax.vmap(
+                obsv, env_state, reward, done, info = jax.vmap(
                     env.step, in_axes=(0, 0, 0)
                 )(rng_step, env_state, 
                   unbatchify(action, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]))
@@ -252,12 +252,11 @@ def make_train(config):
                 done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
                 
                 transition = Transition(
-                    last_done, action, value, reward, log_prob, last_obs, world_state, last_alive_mask, info
+                    last_done, action, value, reward, log_prob, last_obs, world_state, ~(last_done & done), info
                 )
-                alive_mask = alive_mask.reshape(-1)
                 global_obs = jax.vmap(env.get_global_obs, in_axes=(0))(env_state)
 
-                runner_state = (train_states, env_state, obsv, global_obs, alive_mask, done, (ac_hstates, cr_hstates), rng)
+                runner_state = (train_states, env_state, obsv, global_obs, done, (ac_hstates, cr_hstates), rng)
                 return runner_state, transition
 
             initial_hstate = runner_state[-2]
@@ -266,7 +265,7 @@ def make_train(config):
             )
 
             # CALCULATE ADVANTAGE
-            train_states, env_state, last_obs, last_global_obs, last_alive_mask, last_done, hstates, rng = runner_state
+            train_states, env_state, last_obs, last_global_obs, last_done, hstates, rng = runner_state
 
             world_state = last_global_obs[None, :].repeat(config["NUM_ACTORS"],axis=0)
             world_state = world_state.swapaxes(0,1)  
@@ -305,7 +304,7 @@ def make_train(config):
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
-                def _update_minbatch(train_states, batch_info):
+                def _update_minbatch(train_states: Tuple[TrainState, TrainState], batch_info):
                     actor_train_state, critic_train_state = train_states
                     ac_init_hstate, cr_init_hstate, traj_batch, advantages, targets = batch_info
 
@@ -322,7 +321,7 @@ def make_train(config):
                         log_prob += pi[3].log_prob(traj_batch.action[:, :, 3])
 
                         # CALCULATE ACTOR LOSS
-                        logratio = log_prob - traj_batch.log_prob
+                        logratio = (log_prob - traj_batch.log_prob)
                         ratio = jnp.exp(logratio)
                         gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor1 = ratio * gae
@@ -335,18 +334,13 @@ def make_train(config):
                             * gae
                         )
                         loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
-                        loss_actor = (loss_actor * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
+                        loss_actor = (loss_actor * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
 
-                        entropy = (
-                            (pi[0].entropy() * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
-                            + (pi[1].entropy() * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
-                            + (pi[2].entropy() * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
-                            + (pi[3].entropy() * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
-                        )
+                        entropy = ((pi[0].entropy() + pi[1].entropy() + pi[2].entropy()+ pi[3].entropy()) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
                         
                         # debug
-                        approx_kl = (((ratio - 1) - logratio) * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
-                        clip_frac = ((jnp.abs(ratio - 1) > config["CLIP_EPS"]) * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
+                        approx_kl = (((ratio - 1) - logratio) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
+                        clip_frac = ((jnp.abs(ratio - 1) > config["CLIP_EPS"]) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
                         
                         actor_loss = loss_actor - config["ENT_COEF"] * entropy
                         
@@ -362,7 +356,7 @@ def make_train(config):
                         ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
                         value_losses = jnp.square(value - targets)
                         value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                        value_loss = (0.5 * jnp.maximum(value_losses, value_losses_clipped) * traj_batch.alive_mask).sum() / (traj_batch.alive_mask.sum() + 1e-8)
+                        value_loss = (0.5 * jnp.maximum(value_losses, value_losses_clipped) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
                         critic_loss = config["VF_COEF"] * value_loss
                         return critic_loss, (value_loss)
 
@@ -476,9 +470,11 @@ def make_train(config):
                         metric["success"][metric["returned_episode"]].mean(),
                         metric["alive_count"][metric["returned_episode"]].mean(),
                     ))
+                    # print(metric["alive_count"])
+                    # print(metric["alive_count"][metric["returned_episode"]])
                 jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1    
-            runner_state = (train_states, env_state, last_obs, last_global_obs, last_alive_mask, last_done, hstates, rng)
+            runner_state = (train_states, env_state, last_obs, last_global_obs, last_done, hstates, rng)
             return (runner_state, update_steps), None
             # return (runner_state, update_steps), metric
 
@@ -488,7 +484,6 @@ def make_train(config):
             env_state,
             batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]),
             global_obs,
-            jnp.zeros((config["NUM_ENVS"] * config["NUM_ACTORS"]), dtype=bool),
             jnp.zeros((config["NUM_ENVS"] * config["NUM_ACTORS"]), dtype=bool),
             (ac_init_hstate, cr_init_hstate),
             _rng,

@@ -83,7 +83,6 @@ class LogWrapper(JaxMARLWrapper):
         )
         alive_mask = state.env_state.plane_state.is_alive_or_locked
 
-        done["__test__"] = alive_mask
         ep_done = done["__all__"]
         new_episode_return = state.episode_returns + self._batchify_floats(reward).reshape(-1)
         new_episode_length = state.episode_lengths + 1
@@ -103,4 +102,4 @@ class LogWrapper(JaxMARLWrapper):
         info["returned_episode"] = ep_done
         info["alive_count"] = alive_mask.sum()
         info["success"] = info["success"]
-        return obs, state, reward, done, alive_mask, info
+        return obs, state, reward, done, info

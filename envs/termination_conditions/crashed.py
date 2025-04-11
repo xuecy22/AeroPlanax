@@ -11,7 +11,15 @@ def crashed_fn(
     agent_id: AgentID,
 ) -> Tuple[bool, bool]:
     """
-    End up the simulation if the aircraft is on an extreme state.
+    End up the simulation if the aircraft is on an extreme state.\
+    
+    crashed conditions:
+    - collision
+    - extreme_state
+    - high_speed
+    - low_speed
+    - low_altitude
+    - overload
     """
     plane_state: FighterPlaneState = state.plane_state
     done = plane_state.is_crashed[agent_id]

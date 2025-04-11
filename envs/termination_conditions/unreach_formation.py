@@ -5,13 +5,14 @@ from ..core.simulators.fighterplane.dynamics import FighterPlaneState
 import jax.numpy as jnp
 from ..utils.utils import wrap_PI
 
-
+import jax
 def unreach_formation_fn(
     state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
     max_check_interval: int = 200,
-    min_check_interval: int = 2
+    min_check_interval: int = 2,
+    valid_distance: int = 100
 ) -> Tuple[bool, bool]:
     """
     End up the simulation if the aircraft didn't reach the target heading or attitude in limited time.
@@ -26,8 +27,10 @@ def unreach_formation_fn(
     min_check_interval = min_check_interval * params.sim_freq / params.agent_interaction_steps
     mask1 = check_time <= max_check_interval
     mask2 = check_time >= min_check_interval
-    mask3 = distance < 100
-    success = mask1 & mask2 & mask3
+    mask3 = distance < valid_distance
+
+    mask4 = state.plane_state.is_alive_or_locked[agent_id]
+    success = mask1 & mask2 & mask3 & mask4
     # 任务成功或超时, 则任务结束
     done = success | jnp.logical_not(mask1)
     return done, success

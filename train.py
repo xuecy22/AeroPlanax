@@ -10,7 +10,9 @@ from datetime import datetime
 
 from maketrains import (
     make_train_mappo_discrete,
+    make_train_ppo_discrete,
     save_train_mappo,
+    MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,
 )
@@ -25,6 +27,7 @@ config = {
     "OUTPUTDIR": "results/" + str_date_time,
     "LOGDIR": "results/" + str_date_time + "/logs",
     "SAVEDIR": "results/" + str_date_time + "/checkpoints",
+    # "LOADDIR": "/data_ssd2/lxy/AeroPlanax/baselines/formation_2/form_3" 
     # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-01-26-04-39/checkpoints/checkpoint_epoch_1" 
 }
 config = config | MINI_CONFIG
@@ -48,7 +51,7 @@ save_dir = config["SAVEDIR"]
 Path(save_dir).mkdir(parents=True, exist_ok=True)
 
 rng = jax.random.PRNGKey(config["SEED"])
-train_jit = jax.jit(make_train_mappo_discrete(config))
+train_jit = jax.jit(make_train_ppo_discrete(config))
 print('jit ready!')
 
 out = train_jit(rng)
