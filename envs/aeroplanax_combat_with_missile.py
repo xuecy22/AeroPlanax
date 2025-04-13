@@ -47,7 +47,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax/envs/models/baseline"
+    "LOADDIR": "/home/xcy/AeroPlanax-heading/envs/models/baseline"
 }
 
 

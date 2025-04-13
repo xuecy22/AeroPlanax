@@ -11,12 +11,16 @@ from flax import struct
 from gymnax.environments import spaces
 from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
 from .reward_functions import (
+    altitude_reward_fn,
+    posture_reward_fn,
     event_driven_reward_fn,
 )
 from .termination_conditions import (
+    crashed_fn,
     safe_return_fn,
+    timeout_fn,
 )
-from .utils.utils import wrap_PI, wedge_formation, line_formation, diamond_formation, enforce_safe_distance
+from .utils.utils import  wedge_formation, line_formation, diamond_formation, enforce_safe_distance, get_AO_TA_R
 
 
 @struct.dataclass
@@ -35,24 +39,26 @@ class CombatTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class CombatTaskParams(EnvParams):
-    num_allies: int = 100
-    num_enemies: int = 100
+    num_allies: int = 1
+    num_enemies: int = 1
     num_missiles: int = 0
     agent_type: int = 0
-    action_type: int = 0
+    action_type: int = 1
     observation_type: int = 0 # 0: unit_list, 1: conic
-    unit_features: int = 4
-    own_features: int = 6
+    unit_features: int = 6
+    own_features: int = 9
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     max_steps: int = 100
     sim_freq: int = 50
-    agent_interaction_steps: int = 20
+    agent_interaction_steps: int = 10
     max_altitude: float = 6000
-    min_altitude: float = 5800
-    max_vt: float = 360
-    min_vt: float = 300
-    max_distance: float = 150000
-    min_distance: float = 60000
+    min_altitude: float = 6000
+    max_vt: float = 240
+    min_vt: float = 240
+    safe_altitude: float = 4.0
+    danger_altitude: float = 3.5
+    max_distance: float = 50000
+    min_distance: float = 50000
     team_spacing: float = 15000       
     safe_distance: float = 3000
 
@@ -73,11 +79,14 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         }
 
         self.reward_functions = [
-            functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200)
+            functools.partial(altitude_reward_fn, reward_scale=1.0, Kv=0.2),
+            functools.partial(posture_reward_fn, reward_scale=100.0, num_allies=env_params.num_allies, num_enemies=env_params.num_enemies),
+            functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
 
         self.termination_conditions = [
             safe_return_fn,
+            timeout_fn,
         ]
 
     def _get_obs_size(self) -> int:
@@ -148,42 +157,39 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _observe_features(self, state: CombatTaskState, i: int, j_idx: int):
-        cur_pos = jnp.hstack((state.plane_state.north[i], state.plane_state.east[i], state.plane_state.altitude[i]))
-        enemy_pos = jnp.hstack((state.plane_state.north[j_idx], state.plane_state.east[j_idx], state.plane_state.altitude[j_idx]))
-        relative_vector = cur_pos - enemy_pos
-        
-        # 计算敌机的朝向向量
-        st = jnp.sin(state.plane_state.pitch[j_idx])
-        ct = jnp.cos(state.plane_state.pitch[j_idx])
-        spsi = jnp.sin(state.plane_state.yaw[j_idx])
-        cpsi = jnp.cos(state.plane_state.yaw[j_idx])
-        heading_vector = jnp.hstack((ct * cpsi, ct * spsi, st))
-        
-        # 计算相对向量和敌机朝向向量的点积
-        dot_product = jnp.sum(relative_vector * heading_vector)
-        
-        # 计算自机和敌机之间的距离
-        distance = jnp.linalg.norm(relative_vector, axis=0)
+        ego_feature = jnp.hstack((state.plane_state.north[i],
+                                  state.plane_state.east[i],
+                                  state.plane_state.altitude[i],
+                                  state.plane_state.vel_x[i],
+                                  state.plane_state.vel_y[i],
+                                  state.plane_state.vel_z[i]))
+        enm_feature = jnp.hstack((state.plane_state.north[j_idx],
+                                  state.plane_state.east[j_idx],
+                                  state.plane_state.altitude[j_idx],
+                                  state.plane_state.vel_x[j_idx],
+                                  state.plane_state.vel_y[j_idx],
+                                  state.plane_state.vel_z[j_idx]))
+        AO, TA, R, side_flag = get_AO_TA_R(ego_feature, enm_feature)
         norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) / 340
         norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) / 1000
-        norm_AO = dot_product / (distance + 1e-6)  # 防止除以零
-        norm_distance = distance / 10000
-        features = jnp.hstack((norm_delta_vt, norm_delta_altitude, norm_AO, norm_distance))
+        norm_distance = R / 10000
+        
+        features = jnp.hstack((norm_delta_vt, norm_delta_altitude, AO, TA, norm_distance, side_flag))
         return features
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_own_features(self, state: CombatTaskState, i: int):
         altitude = state.plane_state.altitude[i]
         roll, pitch = state.plane_state.roll[i], state.plane_state.pitch[i]
-        vt = state.plane_state.vt[i]
+        vel_x, vel_y, vel_z, vt = state.plane_state.vel_x[i], state.plane_state.vel_y[i], state.plane_state.vel_z[i], state.plane_state.vt[i]
         norm_altitude = altitude / 5000
         roll_sin = jnp.sin(roll)
         roll_cos = jnp.cos(roll)
         pitch_sin = jnp.sin(pitch)
         pitch_cos = jnp.cos(pitch)
-        norm_vt = vt / 340
+        norm_vel_x, norm_vel_y, norm_vel_z, norm_vt = vel_x / 340, vel_y / 340, vel_z / 340, vt / 340
         empty_features = jnp.zeros(shape=(self.own_features,))
-        features = jnp.hstack((norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vt))
+        features = jnp.hstack((norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vel_x, norm_vel_y, norm_vel_z, norm_vt))
         return jax.lax.cond(
             state.plane_state.is_alive[i], lambda: features, lambda: empty_features
         )

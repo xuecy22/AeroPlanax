@@ -18,7 +18,6 @@ import distrax
 import optax
 from envs.wrappers import LogWrapper
 from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
-from envs.aeroplanax_combat_with_missile import AeroPlanaxCombatwithMissileEnv, CombatwithMissileTaskParams
 import orbax.checkpoint as ocp
 
 

@@ -2,6 +2,7 @@ import jax.numpy as jnp
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
 import jax
 
+
 def altitude_reward_fn(
         state: TEnvState,
         params: TEnvParams,
