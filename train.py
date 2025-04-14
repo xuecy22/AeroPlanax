@@ -20,7 +20,7 @@ from envs.aeroplanax_formation_closest import AeroPlanaxFormationEnv, FormationT
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "SEED": 42,
+    "SEED": 114,
     "GROUP": "formation",
     "TYPE_ENV_PARAMS": FormationTaskParams,
     "TYPE_ENV": AeroPlanaxFormationEnv,

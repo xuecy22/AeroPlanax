@@ -6,7 +6,7 @@ from flax.linen.initializers import constant, orthogonal
 
 from networks.scannedRNN import ScannedRNN
 
-MAPPO_DISCRETE_DEFAULT_DIMS = [31, 41, 41, 41]
+MAPPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
 
 class ActorRNN(nn.Module):
     action_dim: Sequence[int]

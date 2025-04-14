@@ -15,14 +15,14 @@ import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import spaces
 from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
-from .reward_functions import (
-    formation_reward_fn,
-    formation_reward_sum_fn,
-    altitude_punishment_fn,
-    event_driven_reward_fn,
-    crash_reward_fn,
-    low_altitude_reward_fn
-)
+# from .reward_functions import (
+#     formation_reward_fn,
+#     formation_reward_sum_fn,
+#     altitude_punishment_fn,
+#     event_driven_reward_fn,
+#     crash_reward_fn,
+#     low_altitude_reward_fn
+# )
 from .termination_conditions import (
     extreme_state_fn,
     high_speed_fn,
@@ -137,27 +137,135 @@ def formation_reward_current_fn(
     )
     mask = state.plane_state.is_alive_or_locked[agent_id]
 
-    jax.debug.print(' {},{},{},{}', reward_distance, reward_angle,reward_velocity,total_reward)
+    # jax.debug.print(' {},{},{},{}', reward_distance, reward_angle,reward_velocity,total_reward)
     return total_reward * reward_scale * mask
 
+
+def formation_reward_only_north_fn(
+    state: FormationTaskState,  
+    params: FormationTaskParams,
+    agent_id: AgentID,
+
+    reward_scale: float = 1.0,
+    xy_error_norm: float = 53824,
+    z_error_norm: float = 53824,
+    
+    yaw_norm: float = 0.1225,
+    pitch_norm: float = 0.17395,
+    roll_norm: float = 12.25,
+
+    speed_norm: float = 24.0,
+
+    d0: float = 232.0,
+    k: float = 0.05
+) -> float:
+
+    target_pos = state.formation_positions[agent_id]
+    
+    delta_north = (state.plane_state.north[agent_id] - target_pos[0])**2
+    delta_east = (state.plane_state.east[agent_id] - target_pos[1])**2
+    delta_altitude = (state.plane_state.altitude[agent_id] - target_pos[2])**2
+    # delta_north = (state.plane_state.north[agent_id] - target_pos[0])**2
+    # delta_east = (state.plane_state.east[agent_id] - target_pos[1])**2
+    # delta_altitude = (state.plane_state.altitude[agent_id] - target_pos[2])**2
+    reward_north = jnp.exp(- delta_north / 22500)
+    reward_east = jnp.exp(- delta_east)
+    reward_altitude = jnp.exp(- delta_altitude)
+
+    reward_distance = (reward_north * reward_east * reward_altitude) ** (1/3)
+
+    # norm_distance_error = (delta_north + delta_east) / xy_error_norm + delta_altitude / z_error_norm
+    
+    # reward_distance = jnp.exp(-norm_distance_error)
+
+    # # NOTE: currently state.target_heading==0
+    # delta_yaw = wrap_PI(state.plane_state.yaw[agent_id] - state.target_heading) ** 2
+    # delta_pitch = wrap_PI(state.plane_state.pitch[agent_id] - state.target_heading) ** 2
+    # delta_roll = wrap_PI(state.plane_state.roll[agent_id] - state.target_heading) ** 2
+    # norm_angle_error = delta_yaw / yaw_norm + delta_pitch / pitch_norm + delta_roll / roll_norm
+
+    # reward_angle = jnp.exp(-norm_angle_error)
+
+
+    delta_v = (state.plane_state.vt[agent_id] - state.target_vt)**2
+    reward_velocity = jnp.exp(-(delta_v / 400))
+
+
+    raw_distance_error = delta_north + delta_east + delta_altitude
+    w_distance = 1 / (1 + jnp.exp(-k * (raw_distance_error - d0)))
+
+    total_reward = (
+        w_distance * reward_distance +
+        (1.0 - w_distance) * (reward_velocity) -
+        0.01
+    )
+    mask = state.plane_state.is_alive_or_locked[agent_id]
+
+    # jax.debug.print(' {},{},{},{}', reward_distance, reward_angle,reward_velocity,total_reward)
+    return total_reward * reward_scale * mask
+
+
+def formation_reward_EZ_fn(
+    state: FormationTaskState,  
+    params: FormationTaskParams,
+    agent_id: AgentID,
+    reward_scale: float = 1.0,
+) -> float:
+    target_pos = state.formation_positions[agent_id]
+    
+    delta_north = (target_pos[0] - state.plane_state.north[agent_id])
+    delta_east = (target_pos[1] - state.plane_state.east[agent_id])
+    delta_altitude = (target_pos[2] - state.plane_state.altitude[agent_id])
+    # norm_distance = jnp.sqrt((delta_north/1000)**2 + (delta_east/1000)**2 + (delta_altitude/1000)**2)
+    norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2) / 1000
+
+    reward_distance = -(norm_distance)
+    amp_distance = jnp.where(norm_distance<0.25, 
+                            jnp.where(norm_distance < 0.1, 0, norm_distance / 0.25),
+                            1)
+
+    heading_vector = jnp.hstack((delta_east, delta_north))
+
+    cos_target_yaw = delta_north / (jnp.linalg.norm(heading_vector) + 1e-6)
+    target_yaw = jnp.arccos(cos_target_yaw) * jnp.sign(delta_east)
+    delta_yaw = jnp.abs(wrap_PI(target_yaw - wrap_PI(state.plane_state.yaw[agent_id])))
+    reward_angle =  -((delta_yaw / (jnp.pi/2)))
+    amp_angle = jnp.where(delta_yaw<0.05, 0,1)
+
+    total_reward = reward_angle * amp_angle + reward_distance * amp_distance
+
+    mask = state.plane_state.is_alive_or_locked[agent_id]
+
+    # jax.debug.print('1 {}',total_reward)
+    return total_reward * reward_scale * mask
 
 def event_driven_reward_fn(
         state: FormationTaskState,
         params: FormationTaskParams,
         agent_id: AgentID,
-        fail_reward: float = -200,
         success_reward: float = 200
     ) -> float:
     """
     Reward is given when the following event happens:
     - Done: +200
-    - Bad_done: -200
     """
-    # in form env:
-    # done : crash or success
+    reward = state.done * state.success * success_reward
+    # jax.debug.print('2 {}',reward)
+    return reward
+
+def crash_reward_fn(
+        state: FormationTaskState,
+        params: FormationTaskParams,
+        agent_id: AgentID,
+        reward: float = -1000,
+    ) -> float:
+    """
+    Reward is given when the plane is alive
+    """
     # 只给上个step还存活，但这个step失败的agent fail_reward
     # 不过在训练的版本中，上个step和本step都死亡的agent的经验被丢弃了，因此这里只是给debug看的
-    reward = state.done * (state.success * success_reward + (1 - state.success) * (~state.last_is_crashed[agent_id]) * fail_reward)
+    reward = (~state.last_is_crashed[agent_id]) *state.plane_state.is_crashed[agent_id] * reward
+    # jax.debug.print('3 {}',reward)
     return reward
 
 class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskParams]):
@@ -178,20 +286,14 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         }
 
         self.reward_functions = [
-            functools.partial(formation_reward_current_fn, reward_scale=1.0),
-
-            # functools.partial(crash_reward_fn, reward=-100),
-            # functools.partial(low_altitude_reward_fn, reward_scale=1.0),
-            # functools.partial(formation_reward_sum_fn, reward_scale=1.0),
-            # functools.partial(altitude_punishment_fn, reward_scale=1.0, Kv=0.2),
-
-            functools.partial(event_driven_reward_fn, fail_reward=-10, success_reward=200),
+            functools.partial(formation_reward_EZ_fn, reward_scale=1.0),
+            functools.partial(crash_reward_fn, reward=-1000),
+            functools.partial(event_driven_reward_fn, success_reward=200),
         ]
 
         self.termination_conditions = [
             crashed_fn,
-            # functools.partial(timeout_fn, max_steps=40),
-            functools.partial(unreach_formation_fn, min_check_interval=2, max_check_interval=400),
+            functools.partial(unreach_formation_fn, min_check_interval=20, max_check_interval=100, valid_distance=200),
         ]
 
     @property
@@ -201,6 +303,10 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
     def _get_obs_size(self) -> int:
         return self.ego_topK * self.unit_features + self.own_features
 
+    def observation_space(self, agent: AgentName) -> spaces.Space:
+        """Observation space for a given agent."""
+        return self.observation_spaces[agent]
+    
     @property
     def default_params(self) -> FormationTaskParams:
         return FormationTaskParams()
@@ -302,12 +408,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
     ) -> jnp.ndarray:
         """Convert discrete action index into continuous value.
         """
-        norm_act = jnp.zeros_like(actions)
-        norm_act = norm_act.at[0].set(actions[0] / 30.)
-        norm_act = norm_act.at[1].set(actions[1] * 2. / 40. - 1.)
-        norm_act = norm_act.at[2].set(actions[2] * 2. / 40. - 1.)
-        norm_act = norm_act.at[3].set(actions[3] * 2. / 40. - 1.)
-        return norm_act        
+        return actions * 2./40. -1.        
     
     @functools.partial(jax.jit, static_argnums=(0,2,))
     def _get_top_k_other_plane_obs(
@@ -330,11 +431,11 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             - [0]. norm_altitude          (unit: 1km)
             - [1]. norm_vt                (unit: mh)
             - [2]. accelearate            (unit: i dont know)
-            - [4]. ego_alpha
-            - [5]. ego_beta
-            - [6]. ego_P                  (unit: rad/s)
-            - [7]. ego_Q                  (unit: rad/s)
-            - [8]. ego_R                  (unit: rad/s)
+            - [3]. ego_alpha
+            - [4]. ego_beta
+            - [5]. ego_P                  (unit: rad/s)
+            - [6]. ego_Q                  (unit: rad/s)
+            - [7]. ego_R                  (unit: rad/s)
         - team observation(dim 6)
             - [0] delta_norm_north   (unit: 1km)
             - [1] delta_norm_east   (unit: 1km)
@@ -342,7 +443,6 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             - [3] delta_norm_vt(to other plane)         (unit: mh)
             
             - [4] norm_AO               (飞机->他机和他机飞行方向的cos值) [-1, 1]
-            - [5] norm_distance         (unit: 5km)
 
         """
         distances = self._get_distances(state, invalid_mask=114514.0)
@@ -518,10 +618,13 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
 
         R_XY = params.max_xy_increment
         R_Z = params.max_z_increment
-        key_xy, key_z = jax.random.split(key)
+        key_x, key_y, key_z = jax.random.split(key, 3)
 
-        dxy = jax.random.uniform(key_xy, shape=(self.num_allies,2), minval=-R_XY, maxval=R_XY)
-        init_positions = formation_positions.at[:, 0:2].add(dxy)
+        dx = jax.random.uniform(key_x, shape=(self.num_allies,), minval=-R_XY, maxval=R_XY)
+        init_positions = formation_positions.at[:, 0].add(dx)
+        
+        dy = jax.random.uniform(key_y, shape=(self.num_allies,), minval=-R_XY, maxval=R_XY)
+        init_positions = init_positions.at[:, 1].add(dy)
         
         dz = jax.random.uniform(key_z, shape=(self.num_allies,), minval=-R_Z, maxval=R_Z)
         init_positions = init_positions.at[:, 2].add(dz)

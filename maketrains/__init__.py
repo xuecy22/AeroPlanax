@@ -15,6 +15,11 @@ from maketrains.mappo_discrete_eval import (
 
 from maketrains.ppo_discrete import (
     make_train as make_train_ppo_discrete,
+    save_train as save_train_ppo_discrete
+)
+
+from maketrains.ppo_discrete_raw import (
+    make_train as make_train_ppo,
     save_train as save_train_ppo
 )
 

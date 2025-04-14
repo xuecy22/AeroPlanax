@@ -9,7 +9,7 @@ from flax.linen.initializers import constant, orthogonal
 
 from networks.scannedRNN import ScannedRNN
 
-PPO_DISCRETE_DEFAULT_DIMS = [31, 41, 41, 41]
+PPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
 
 
 class ActorCriticRNN(nn.Module):

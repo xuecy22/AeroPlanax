@@ -64,6 +64,10 @@ class LogWrapper(JaxMARLWrapper):
     def global_obs_size(self) -> int:
         return self._env.global_obs_size
     
+    @property
+    def ego_obs_size(self) -> int:
+        return self._env._get_obs_size()
+    
     @partial(jax.jit, static_argnums=(0,))
     def get_global_obs(
         self,
