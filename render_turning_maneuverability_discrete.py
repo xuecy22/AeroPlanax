@@ -233,7 +233,7 @@ def test(config, rng):
         init_hstate,
         _rng,
     )
-    for _ in range(1000):
+    for _ in range(5000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
         success_times = traj_batch.info['heading_turn_counts']
@@ -259,7 +259,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-07-16-47/checkpoints/checkpoint_epoch_1000" 
+    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-10-01-54/checkpoints/checkpoint_epoch_2111" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

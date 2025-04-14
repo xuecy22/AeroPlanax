@@ -11,7 +11,7 @@ def unreach_heading_fn(
     state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
-    max_check_interval: int = 30,
+    max_check_interval: int = 50,
     min_check_interval: int = 0.2
 ) -> Tuple[bool, bool]:
     """
@@ -25,8 +25,8 @@ def unreach_heading_fn(
     # 判断时间
     max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps # 50*50/10=250
     # min_check_interval = min_check_interval * params.sim_freq / params.agent_interaction_steps # 0.2*50/10=1
-    mask1 = check_time >= max_check_interval
     # mask1 = check_time >= max_check_interval
+    mask1 = check_time <= max_check_interval
     # mask2 = check_time >= min_check_interval
     # 判断是否到达target_heading
     mask3 = jnp.abs(wrap_PI(yaw - state.target_heading[agent_id])) < jnp.pi / 36 # jnp.pi / 18 = 0.174532925199
@@ -41,8 +41,8 @@ def unreach_heading_fn(
 
     success = mask1 & mask3
     # 任务超时, 则任务结束
-    # done = jnp.logical_not(mask1)
-    done = mask1 & (~mask3)
+    done = jnp.logical_not(mask1)
+    # done = mask1 & (~mask3)
 
     # # 调试输出
     # jax.debug.print("unreach_heading.py: UnreachHeading Debug (agent {agent}): time={time}, check_time={ct}, yaw={yaw}, target_heading={target}, mask1={m1}, mask3={m3}, done={done}, success={success}",

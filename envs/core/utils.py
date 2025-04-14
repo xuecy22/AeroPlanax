@@ -77,6 +77,13 @@ def check_crashed(state: BasePlaneState, agent_id):
     mask6 = check_overload(state, agent_id)
     mask7 = check_high_altitude(state, agent_id)
     crashed = mask1 | mask2 | mask3 | mask4 | mask5 | mask6 | mask7
+    # jack = jax.lax.cond(
+    #     crashed,
+    #     lambda _: jax.debug.print("Terminated by check_crashed: crashed={crashed}, mask1={m1}, mask2={m2}, mask3={m3}, mask4={m4}, mask5={m5}, mask6={m6}, mask7={m7}",
+    #                               crashed=crashed, m1=mask1, m2=mask2, m3=mask3, m4=mask4, m5=mask5, m6=mask6, m7=mask7),
+    #     lambda _: None,
+    #     operand=None,
+    # )
     return crashed
 
 def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp.pi/3):

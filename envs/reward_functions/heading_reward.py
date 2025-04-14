@@ -42,8 +42,9 @@ def heading_reward_fn(
 
     reward_target = (heading_r * alt_r * roll_r * speed_r) ** (1 / 4)
     mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
-    # # 调试输出
-    # jax.debug.print("heading_reward.py: HeadingReward Debug (agent {agent}): delta_heading={dh}, delta_altitude={da}, delta_vt={dv}, reward_target={rt}",
-    #                 agent=agent_id, dh=delta_heading, da=delta_altitude, dv=delta_vt, rt=reward_target)
+    # # # 调试输出
+    # jax.debug.print("mask={m}, is_alive={alive}, is_locked={locked}", 
+    #                 m=mask, alive=state.plane_state.is_alive[agent_id], 
+    #                 locked=state.plane_state.is_locked[agent_id])
     
     return reward_target * reward_scale * mask

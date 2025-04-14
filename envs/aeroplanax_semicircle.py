@@ -76,7 +76,7 @@ class SemicircleTaskParams(EnvParams):
 
 
     # # 定义完成半圆所需的总步数
-    total_turn_steps: int = 36
+    total_turn_steps: int = 3
     heading_increment: float = jnp.pi / total_turn_steps
     # ############################################################################
     # # 创建课程学习角度序列

@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
@@ -235,7 +235,7 @@ def test(config, rng):
         init_hstate,
         _rng,
     )
-    for _ in range(2000):
+    for _ in range(5000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
         success_times = traj_batch.info['heading_turn_counts']
@@ -261,7 +261,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-07-14-14/checkpoints/checkpoint_epoch_3333" 
+    # "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-08-01-41/checkpoints/checkpoint_epoch_3333" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

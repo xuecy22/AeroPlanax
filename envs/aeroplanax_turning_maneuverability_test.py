@@ -78,8 +78,8 @@ class turning_maneuverability_TaskParams(EnvParams):
     # # 定义完成半圆所需的总步数
     # total_turn_steps: int = 6
     # heading_increment: float = jnp.pi / total_turn_steps
-    # initial_heading_increment: float = jnp.deg2rad(5)  # 初始5度（弧度）
-    # increment_step_size: float = jnp.deg2rad(5)       # 线性递增步长5度
+    initial_heading_increment: float = jnp.deg2rad(5)  # 初始5度（弧度）
+    increment_step_size: float = jnp.deg2rad(5)       # 线性递增步长5度
     # ############################################################################
     # # 创建课程学习角度序列
     # # 使用指数增长分布，保证总和为π(180°)
@@ -121,7 +121,7 @@ class AeroPlanax_turning_maneuverability_Env(AeroPlanaxEnv[turning_maneuverabili
         ]
 
         # 课程学习：
-        self.increment_size = jnp.array([0.8, 1.0, 1.2, 1.4, 1.6] + [1.6] * 10)
+        self.increment_size = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0] + [5.0] * 10)
         # 前5个元素是 [0.2, 0.4, 0.6, 0.8, 1.0]
         # 后10个元素是 [1.0] 重复10次
         # 该数组用于控制航向/高度/速度变化量的增量系数
@@ -156,16 +156,16 @@ class AeroPlanax_turning_maneuverability_Env(AeroPlanaxEnv[turning_maneuverabili
         """Task-specific reset."""
         state = self._generate_formation(key, state, params)
 
-        ############################ aeroplanax_heading.py 任务 ############################
-        key, key_vt = jax.random.split(key)
-        vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)        # 随机初始速度
-        vel_x = vt
-        ############################ aeroplanax_heading.py 任务 ############################
+        # ############################ aeroplanax_heading.py 任务 ############################
+        # key, key_vt = jax.random.split(key)
+        # vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)        # 随机初始速度
+        # vel_x = vt
+        # ############################ aeroplanax_heading.py 任务 ############################
 
         key_alt, key_vt = jax.random.split(key, 2)
         # # 随机生成初始高度和速度
         altitude = jax.random.uniform(key_alt, shape=(self.num_agents,), minval=params.min_altitude, maxval=params.max_altitude)
-        # vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
+        vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
         # key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
         # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
         # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
@@ -186,7 +186,8 @@ class AeroPlanax_turning_maneuverability_Env(AeroPlanaxEnv[turning_maneuverabili
 
         state = state.replace(
             plane_state=state.plane_state.replace(
-                vel_x=vel_x,
+                altitude=altitude,
+                # vel_x=vel_x,
                 vt=vt,
             ),
             target_heading=state.plane_state.yaw,  # 初始目标航向=当前航向
@@ -205,35 +206,35 @@ class AeroPlanax_turning_maneuverability_Env(AeroPlanaxEnv[turning_maneuverabili
         params: turning_maneuverability_TaskParams,
     ) -> Tuple[turning_maneuverability_TaskState, Dict[str, Any]]:
         """Task-specific step transition."""
-        # # 计算当前应增加的角度（初始(5°) + 步长(5°)*步数）
-        # current_angle = (
-        #     params.initial_heading_increment + 
-        #     params.increment_step_size * state.heading_turn_counts
-        # )
+        # 计算当前应增加的角度（初始(5°) + 步长(5°)*步数）
+        current_angle = (
+            params.initial_heading_increment + 
+            params.increment_step_size * state.heading_turn_counts
+        )
 
-        # # 更新目标航向（仅在成功时）
-        # new_target_heading = jax.lax.cond(
-        #     jnp.squeeze(state.plane_state.is_success),
-        #     lambda: wrap_PI(state.target_heading + current_angle),
-        #     lambda: state.target_heading
-        # )
-        ############### aeroplanax_heading.py 任务 ############################
+        # 更新目标航向（仅在成功时）
+        new_target_heading = jax.lax.cond(
+            jnp.squeeze(state.plane_state.is_success),
+            lambda: wrap_PI(state.target_heading + current_angle),
+            lambda: state.target_heading
+        )
+        # ############### aeroplanax_heading.py 任务 ############################
 
-        delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
-        key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
-         # 随机航向变化量(-π, π)
-        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
-         # 高度变化量(±2100m)
-        delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
-        # 速度变化量(±100m/s)
-        delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+        # delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
+        # key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
+        # delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
+        #  # 随机航向变化量(-π, π)
+        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
+        #  # 高度变化量(±2100m)
+        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        # # 速度变化量(±100m/s)
+        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
 
-        target_altitude = state.target_altitude
-        target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
-        target_vt = state.target_vt
+        # target_altitude = state.target_altitude
+        # target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
+        # target_vt = state.target_vt
 
-        ############### aeroplanax_heading.py 任务 ############################
+        # ############### aeroplanax_heading.py 任务 ############################
         
         
         new_state = state.replace(
@@ -241,9 +242,7 @@ class AeroPlanax_turning_maneuverability_Env(AeroPlanaxEnv[turning_maneuverabili
                 status=jnp.where(state.plane_state.is_success, 0, state.plane_state.status)
             ),
             success=False,
-            target_heading=target_heading,
-            target_altitude=target_altitude,
-            target_vt=target_vt,
+            target_heading=new_target_heading,
             last_check_time=state.time,
             heading_turn_counts=(state.heading_turn_counts + 1),
         )
