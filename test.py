@@ -14,7 +14,7 @@ from maketrains import (
     MINI_CONFIG,
     MEDIUM_CONFIG,
 )
-from envs.aeroplanax_formation_closest import AeroPlanaxFormationEnv, FormationTaskParams
+from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {

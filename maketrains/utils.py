@@ -90,35 +90,27 @@ def init_network(env : LogWrapper, config : Dict[str, Any]):
     critic_network_params = critic_network.init(_rng_critic, cr_init_hstate, cr_init_x)
     
     if config["ANNEAL_LR"]:
-        ac_tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(learning_rate=linear_schedule, eps=1e-5),
-        )
-        cr_tx = optax.chain(
+        tx = optax.chain(
             optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
             optax.adam(learning_rate=linear_schedule, eps=1e-5),
         )
     else:
-        ac_tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(config["LR"], eps=1e-5),
-        )
-        cr_tx = optax.chain(
+        tx = optax.chain(
             optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
             optax.adam(config["LR"], eps=1e-5),
         )
     ac_train_state = TrainState.create(
         apply_fn=actor_network.apply,
         params=actor_network_params,
-        tx=ac_tx,
+        tx=tx,
     )
     cr_train_state = TrainState.create(
         apply_fn=critic_network.apply,
         params=critic_network_params,
-        tx=cr_tx,
+        tx=tx,
     )
 
-    return (actor_network, critic_network), (ac_train_state, cr_train_state), (ac_init_hstate, cr_init_hstate)
+    return (actor_network, critic_network), (ac_train_state, cr_train_state)
 
 
 def batchify(x: Dict[str, Any], agent_list: List[str], num_envs: int, num_actors: int):

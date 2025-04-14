@@ -60,7 +60,7 @@ from networks import (
     ScannedRNN,
     PPOActorCriticDiscrete as ActorCriticDiscrete,
     PPO_DISCRETE_DEFAULT_DIMS,
-    unzip_ppo_discrete_action
+    unzip_discrete_action
 )
 
 @struct.dataclass
@@ -201,7 +201,7 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         
         state = state.replace(hstate=hstate)
 
-        _ , actions, _ = unzip_ppo_discrete_action(key, pi)
+        _ , actions, _ = unzip_discrete_action(key, pi)
 
         actions = jnp.clip(actions.squeeze(0), min=-1, max=1)
         

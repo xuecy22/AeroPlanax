@@ -9,7 +9,6 @@
 
 BASE_CONFIG = {
     "LR": 3e-4,
-    "NUM_ACTORS": 2,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,

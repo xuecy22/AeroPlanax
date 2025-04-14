@@ -516,3 +516,4 @@ def save_train(out: Dict[str, Any], save_dir: str):
     ckptr.wait_until_finished()
 
     print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
+    return checkpoint_path
