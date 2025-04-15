@@ -62,7 +62,15 @@ def check_overload(state: BasePlaneState, agent_id, max_overload=10.0):
     done = mask1 | mask2 | mask3
     # jack = jax.lax.cond(
     #     done,
-    #     lambda _: jax.debug.print("Terminated by overload_fn: done={done} (agent {agent})", done=done, agent=agent_id),
+    #     # lambda _: jax.debug.print("Terminated by overload_fn: overload={done} (agent {agent})", done=done, agent=agent_id),
+    #     lambda _:
+    #     jax.debug.print(
+    #         "Plane {agent} crashed! ax={:.2f}, ay={:.2f}, az={:.2f}",
+    #         state.ax[agent_id],
+    #         state.ay[agent_id],
+    #         state.az[agent_id],
+    #         agent=agent_id
+    #     ),
     #     lambda _: None,
     #     operand=None,
     # )

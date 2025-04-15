@@ -124,14 +124,23 @@ def ecef_to_geodetic(x, y, z):
     height = U * (1 - b2 / (a * V)) 
     lat = jnp.atan((z + ep * ep *zo) / r) 
     temp = jnp.atan(y / x) 
-    if x >=0 :    
-        long = temp 
-    elif (x < 0) & (y >= 0):
-        long = pi + temp 
-    else :
-        long = temp - pi 
-    lat0 = lat/(pi/180) 
-    lon0 = long/(pi/180) 
+
+    # 逐元素判断 x >= 0 / (x < 0 & y >= 0) / 其它
+    mask1 = (x >= 0)
+    mask2 = (x < 0) & (y >= 0)
+
+    long_ = jnp.where(
+        mask1,
+        temp,                   # x >= 0 时
+        jnp.where(
+            mask2,
+            jnp.pi + temp,      # x < 0 & y >= 0
+            temp - jnp.pi       # 剩余情况
+        )
+    )
+
+    lat0 = lat * (180.0 / jnp.pi)
+    lon0 = long_ * (180.0 / jnp.pi)
     h0 = height
     return lat0, lon0, h0
 
@@ -307,6 +316,18 @@ def diamond_formation(num_agents, spacing):
     return positions
 
 def enforce_safe_distance(positions, center, safe_distance):
+    """
+    确保所有位置在指定中心周围的距离不超过安全距离。
+
+    Args:
+        positions (jnp.ndarray): 初始位置数组，形状为 (n, 3)，n 表示位置数量。
+        center (jnp.ndarray): 中心位置，形状为 (3,)。
+        safe_distance (float): 安全距离。
+
+    Returns:
+        jnp.ndarray: 调整后的位置数组，形状为 (n, 3)。
+
+    """
     def agent_loop(i, carry):
         formation_positions, positions = carry
         pos = positions[i] + center

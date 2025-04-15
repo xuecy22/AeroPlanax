@@ -170,6 +170,22 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         actions: Dict[AgentName, chex.Array],
         params: Optional[TEnvParams] = None,
     ) -> Tuple[Dict[AgentName, chex.Array], TEnvState, Dict[AgentName, float], Dict[AgentName, bool], Dict[str, Any]]:
+        """
+        在环境中执行步长过渡。如果完成，则重置环境。
+        Args:
+            key (chex.PRNGKey): 伪随机数生成器的键。
+            state (TEnvState): 环境的状态。
+            actions (Dict[AgentName, chex.Array]): 智能体的动作字典。
+            params (Optional[TEnvParams], optional): 环境参数，默认为 None。如果为 None，则使用默认参数。默认为 None。
+        Returns:
+            Tuple[Dict[AgentName, chex.Array], TEnvState, Dict[AgentName, float], Dict[AgentName, bool], Dict[str, Any]]:
+                包含以下内容的元组：
+                - obs (Dict[AgentName, chex.Array]): 智能体的观察值字典。
+                - state (TEnvState): 更新后的环境状态。
+                - rewards (Dict[AgentName, float]): 智能体的奖励值字典。
+                - dones (Dict[AgentName, bool]): 智能体的终止标志字典。
+                - info (Dict[str, Any]): 包含额外调试信息的字典。
+        """
         """Performs step transitions in the environment. Resets the environment if done."""
         if params is None:
             params = self.default_params
@@ -379,28 +395,41 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         with open(self.filename, mode='a', encoding='utf-8') as f:
             timestamp = state.time * params.agent_interaction_steps / params.sim_freq
             f.write(f"#{timestamp[0]:.2f}\n")
-            for i in range(self.num_agents):
-                npos = state.plane_state.north[i]
-                epos = state.plane_state.east[i]
-                alt = state.plane_state.altitude[i]
-                roll = state.plane_state.roll[i] * 180 / jnp.pi
-                pitch = state.plane_state.pitch[i] * 180 / jnp.pi
-                yaw = state.plane_state.yaw[i] * 180 / jnp.pi
+            for i in range(self.num_allies):
+                npos = state.plane_state.north[0][i]
+                epos = state.plane_state.east[0][i]
+                alt = state.plane_state.altitude[0][i]
+                roll = state.plane_state.roll[0][i] * 180 / jnp.pi
+                pitch = state.plane_state.pitch[0][i] * 180 / jnp.pi
+                yaw = state.plane_state.yaw[0][i] * 180 / jnp.pi
                 lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
-                log_msg = f"{100 + i},T={lon[0]}|{lat[0]}|{alt[0]}|{roll[0]}|{pitch[0]}|{yaw[0]},"
+                log_msg = f"{100 + i},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
                 log_msg += f"Name=F16,"
                 log_msg += f"Color=Red"
                 if log_msg is not None:
                     f.write(log_msg + "\n")
-            for i in range(self.num_missiles):
-                npos = state.missile_state.north[i]
-                epos = state.missile_state.east[i]
-                alt = state.missile_state.altitude[i]
-                roll = state.missile_state.roll[i] * 180 / jnp.pi
-                pitch = state.missile_state.pitch[i] * 180 / jnp.pi
-                yaw = state.missile_state.yaw[i] * 180 / jnp.pi
+            for i in range(self.num_allies, self.num_agents):
+                npos = state.plane_state.north[0][i]
+                epos = state.plane_state.east[0][i]
+                alt = state.plane_state.altitude[0][i]
+                roll = state.plane_state.roll[0][i] * 180 / jnp.pi
+                pitch = state.plane_state.pitch[0][i] * 180 / jnp.pi
+                yaw = state.plane_state.yaw[0][i] * 180 / jnp.pi
                 lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
-                log_msg = f"{100 + self.num_agents + i},T={lon[0]}|{lat[0]}|{alt[0]}|{roll[0]}|{pitch[0]}|{yaw[0]},"
+                log_msg = f"{100 + i},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
+                log_msg += f"Name=F16,"
+                log_msg += f"Color=Blue"
+                if log_msg is not None:
+                    f.write(log_msg + "\n")
+            for i in range(self.num_missiles):
+                npos = state.missile_state.north[0][i]
+                epos = state.missile_state.east[0][i]
+                alt = state.missile_state.altitude[0][i]
+                roll = state.missile_state.roll[0][i] * 180 / jnp.pi
+                pitch = state.missile_state.pitch[0][i] * 180 / jnp.pi
+                yaw = state.missile_state.yaw[0][i] * 180 / jnp.pi
+                lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
+                log_msg = f"{100 + self.num_agents + i},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
                 log_msg += f"Name=AIM-9L,"
                 log_msg += f"Color=Blue"
                 if log_msg is not None:
@@ -470,35 +499,42 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         params: TEnvParams,
     ) -> Tuple[TEnvState, Dict[AgentName, bool]]:
         """
-        Aggregate termination conditions.
+        聚合终止条件。
 
         Args:
-            state (TEnvState): current environment state
-            params (TEnvParams): current environment parameters
+            state (TEnvState): 当前环境状态
+            params (TEnvParams): 当前环境参数
 
         Returns:
-            Tuple[TEnvState, Dict[AgentName, bool]]: updated environment state
-            and agents' termination flags.
+            Tuple[TEnvState, Dict[AgentName, bool]]: 更新后的环境状态
+            和代理的终止标志。
         """
+        # 初始化所有代理的终止标志为False
         dones = jnp.zeros(self.num_agents, dtype=jnp.bool_)
         successes = jnp.zeros(self.num_agents, dtype=jnp.bool_)
         for termination_condition in self.termination_conditions:
+            # 对每个终止条件，应用vmap函数并行处理所有代理
             new_done, new_success = jax.vmap(
                 termination_condition, in_axes=(None, None, 0)
             )(state, params, jnp.arange(self.num_agents))
-            dones = jnp.logical_or(dones, new_done)
+            # 更新终止标志
+            dones = jnp.logical_or(dones, new_done) 
             successes = jnp.logical_or(successes, new_success)
-            # TODO: early stop when all agents are done
-        # modify state
+            # TODO: 当所有代理都完成时提前停止
+        # 修改状态
+        # 更新飞机的状态
         state = state.replace(
             plane_state=state.plane_state.replace(
+                # 如果代理成功，则飞机的状态设置为4，否则保持不变
                 status=jnp.where(successes, 4, state.plane_state.status)
             )
         )
+        # 更新环境的done和success标志
         state = state.replace(
-            done=jnp.all(dones),
-            success=jnp.all(successes)
+            done=jnp.all(dones),  # 当所有代理都完成时，done为True
+            success=jnp.all(successes)  # 当所有代理都成功时，success为True
         )
+        # 将终止标志转换为字典形式，方便后续处理
         dones = {
             agent: dones[i] for i, agent in enumerate(self.agents)
         }

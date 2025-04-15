@@ -13,6 +13,7 @@ from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
 from .reward_functions import (
     formation_reward_fn,
     event_driven_reward_fn,
+    heading_reward_fn
 )
 from .termination_conditions import (
     crashed_fn,
@@ -26,9 +27,12 @@ from .utils.utils import wrap_PI, wedge_formation, line_formation, diamond_forma
 
 @struct.dataclass
 class FormationTaskState(EnvState):
+    target_heading: ArrayLike 
+    target_altitude: ArrayLike
+    target_vt: ArrayLike
     formation_positions: ArrayLike
     @classmethod
-    def create(cls, env_state: EnvState, formation_positions: Array):
+    def create(cls, env_state: EnvState, formation_positions: Array, extra_state: Array):
         return cls(
             plane_state=env_state.plane_state,
             missile_state=env_state.missile_state,
@@ -37,23 +41,29 @@ class FormationTaskState(EnvState):
             success=env_state.success,
             time=env_state.time,
             formation_positions=formation_positions, 
+            target_heading=extra_state[0],
+            target_altitude=extra_state[1],
+            target_vt=extra_state[2]
         )
 
 
 @struct.dataclass(frozen=True)
 class FormationTaskParams(EnvParams):
-    num_allies: int = 2
+    num_allies: int = 3
     num_enemies: int = 0
-    agent_type: int = 0
-    action_type: int = 0
+    agent_type: int = 0   # 0: fighterplane, 1: canardplane
+    action_type: int = 1  # 0: continuous, 1: discrete
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
+    sim_freq: int = 50
+    agent_interaction_steps: int = 10
     max_altitude: float = 6000
     min_altitude: float = 5800
     max_vt: float = 360
     min_vt: float = 300
+    max_heading_increment: float = jnp.pi / 6  # 最大航向变化量(π≈90°)
     noise_scale: float = 0.0
-    team_spacing: float = 15000       
-    safe_distance: float = 3000
+    team_spacing: float = 5000  # team_spacing 主要影响编队中飞机之间的相对距离和编队的整体形状。     
+    safe_distance: float = 200 # safe_distance 参数被用于调整生成的编队位置，以确保任何两架飞机之间的距离都不小于 safe_distance
 
 class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskParams]):
     def __init__(self, env_params: Optional[FormationTaskParams] = None):
@@ -70,12 +80,13 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         self.reward_functions = [
             functools.partial(formation_reward_fn, reward_scale=1.0),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
+            # functools.partial(heading_reward_fn, reward_scale=1.0)
         ]
 
         self.termination_conditions = [
             crashed_fn,
             timeout_fn,
-            unreach_heading_fn,
+            # unreach_heading_fn,
             unreach_formation_fn,
         ]
 
@@ -93,7 +104,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         params: FormationTaskParams,
     ) -> FormationTaskState:
         state = super()._init_state(key, params)
-        state = FormationTaskState.create(state, formation_positions=jnp.zeros((self.num_agents, 3)))
+        state = FormationTaskState.create(state, formation_positions=jnp.zeros((self.num_agents, 3)), extra_state=jnp.zeros((3, self.num_agents)))
         return state
     
     # 任务特定的重置逻辑
@@ -110,18 +121,30 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
         vel_x = vt
 
+        key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
+        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=params.max_heading_increment, maxval=params.max_heading_increment)
+        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+
+        # target_altitude = state.plane_state.altitude + delta_altitude
+        target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
+
+
         state = state.replace(
             plane_state=state.plane_state.replace(
                 vel_x=vel_x,
                 vt=vt,
             ),
             formation_positions=formation_positions,
+            target_heading=target_heading,  # 初始目标航向=当前航向
+            target_altitude=state.plane_state.altitude, # 目标高度=当前高度
+            target_vt=vt,                     # 目标速度=随机初始速度
         )
         return state
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _step_task(self, key, state, info, action, params):
-        delta_time = 1.0 / params.sim_freq * params.agent_interaction_steps
+        delta_time = 1.0 / params.sim_freq * params.agent_interaction_steps # 1 / 仿真频率 * 智能体交互步数 = 1 / 控制频率 =  1 /50 * 10 = 0.002 （控制时间）
         delta_distance = jnp.mean(state.plane_state.vt) * delta_time
         state = state.replace(
             formation_positions=state.formation_positions.at[:, 0].set(state.formation_positions[:, 0] + delta_distance)
@@ -167,9 +190,19 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         P, Q, R = state.plane_state.P, state.plane_state.Q, state.plane_state.R
 
         # 计算归一化的观测值
-        norm_delta_north = (north - state.formation_positions[:, 0]) / 1000
-        norm_delta_east = (east - state.formation_positions[:, 1]) / 1000
-        norm_delta_altitude = (altitude - state.formation_positions[:, 2]) / 1000
+        ############################################################
+        # norm_delta_north = (north - state.formation_positions[:, 0]) / 1000
+        # norm_delta_east = (east - state.formation_positions[:, 1]) / 1000
+        # norm_delta_altitude = (altitude - state.formation_positions[:, 2]) / 1000
+        ############################################################
+
+        ############################################################
+        # 用heading policy测试多机编队
+        norm_delta_altitude = (altitude - state.target_altitude) / 1000
+        norm_delta_heading = wrap_PI((yaw - state.target_heading))
+        norm_delta_vt = (vt - state.target_vt) / 340
+        ############################################################
+
         norm_altitude = altitude / 5000
         roll_sin = jnp.sin(roll)
         roll_cos = jnp.cos(roll)
@@ -182,11 +215,22 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         beta_cos = jnp.cos(beta)
 
         # 将观测值堆叠成一个数组
-        obs = jnp.vstack((norm_delta_north, norm_delta_east, norm_delta_altitude,
+
+        ############################################################
+        # 用heading policy测试多机编队
+        obs = jnp.vstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
                             norm_altitude, norm_vt,
                             roll_sin, roll_cos, pitch_sin, pitch_cos,
                             alpha_sin, alpha_cos, beta_sin, beta_cos,
                             P, Q, R))
+        ############################################################
+
+        # obs = jnp.vstack((norm_delta_north, norm_delta_east, norm_delta_altitude,
+        #                     norm_altitude, norm_vt,
+        #                     roll_sin, roll_cos, pitch_sin, pitch_cos,
+        #                     alpha_sin, alpha_cos, beta_sin, beta_cos,
+        #                     P, Q, R))
+
         return {agent: obs[:, i] for i, agent in enumerate(self.agents)}
     
     @functools.partial(jax.jit, static_argnums=(0, ))
@@ -196,12 +240,27 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             state: FormationTaskState,
             params: FormationTaskParams,
         ):
+        """
+        生成编队位置。
+    
+        Args:
+            key (chex.PRNGKey): 随机数生成器的键。
+            state (FormationTaskState): 编队任务的状态。
+            params (FormationTaskParams): 编队任务的参数。
+    
+        Returns:
+            Tuple[FormationTaskState, np.ndarray]: 包含更新后的编队任务状态和生成的编队位置。
+    
+        Raises:
+            ValueError: 如果提供的编队类型无效。
+    
+        """
 
         if self.formation_type == 0:
             team_positions = wedge_formation(self.num_allies, params.team_spacing)
         elif self.formation_type == 1:
             team_positions = line_formation(self.num_allies, params.team_spacing)
-        elif self.formation_type == 1:
+        elif self.formation_type == 2:
             team_positions = diamond_formation(self.num_allies, params.team_spacing)
         else:
             raise ValueError("Provided formation type is not valid")

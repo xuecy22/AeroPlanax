@@ -13,9 +13,7 @@ def unreach_formation_fn(
     max_check_interval: int = 100,
     min_check_interval: int = 2
 ) -> Tuple[bool, bool]:
-    """
-    End up the simulation if the aircraft didn't reach the target heading or attitude in limited time.
-    """
+
     plane_state: FighterPlaneState = state.plane_state
     target_pos = state.formation_positions[agent_id]
     current_pos = jnp.array([plane_state.north[agent_id], plane_state.east[agent_id], plane_state.altitude[agent_id]])
@@ -24,10 +22,16 @@ def unreach_formation_fn(
     # 判断时间
     max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
     min_check_interval = min_check_interval * params.sim_freq / params.agent_interaction_steps
-    mask1 = check_time <= max_check_interval
-    mask2 = check_time >= min_check_interval
+    # mask1 = check_time <= max_check_interval
+    mask1 = check_time >= max_check_interval
+    # mask2 = check_time >= min_check_interval
     mask3 = distance < 100
-    success = mask1 & mask2 & mask3
+    # success = mask1 & mask2 & mask3
+    success = mask1 & mask3
     # 任务成功或超时, 则任务结束
-    done = success | jnp.logical_not(mask1)
+    # done = success | jnp.logical_not(mask1)
+    # 任务超时, 则任务结束
+    # done = jnp.logical_not(mask1)
+    done = mask1 & (~mask3)
+    # done = success | (mask1 & (~mask3))
     return done, success
