@@ -127,13 +127,11 @@ def make_train(config):
     env = AeroPlanaxCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
-    config['NUM_ALLIES'] = env.num_allies
-    config['NUM_ENEMIES'] = env.num_enemies
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
     config["MINIBATCH_SIZE"] = (
-        config["NUM_ALLIES"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
+        config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
     if "LOADDIR" in config:
         network = ActorCriticRNN([31, 41, 41, 41], config=config)
@@ -181,25 +179,12 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         init_x = (
             jnp.zeros(
-                (1, config["NUM_ENVS"] * config["NUM_ALLIES"], *env.observation_space(env.agents[0], env_params).shape)
+                (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
             ),
-            jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ALLIES"])),
+            jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
         )
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ALLIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
         network_params = network.init(_rng, init_hstate, init_x)
-
-        # INIT OPPONENT NETWORK
-        enm_network = ActorCriticRNN([31, 41, 41, 41], config=config)
-        rng, _rng = jax.random.split(rng)
-        init_x = (
-            jnp.zeros(
-                (1, config["NUM_ENVS"] * config["NUM_ENEMIES"], *env.observation_space(env.agents[0], env_params).shape)
-            ),
-            jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ENEMIES"])),
-        )
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENEMIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-        enm_network_params = enm_network.init(_rng, init_hstate, init_x)
-
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -226,8 +211,7 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
-        init_ego_hstate = ScannedRNN.initialize_carry(config["NUM_ALLIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-        init_enm_hstate = ScannedRNN.initialize_carry(config["NUM_ENEMIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
         # INIT Tensorboard
         if config.get("DEBUG"):
@@ -236,9 +220,18 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps, enm_network_params = update_runner_state
-            
-            def _get_actions(rng, pi):
+            runner_state, update_steps = update_runner_state
+
+            def _env_step(runner_state, unused):
+                train_state, env_state, last_obs, last_done, hstate, rng = runner_state
+
+                # SELECT ACTION
+                ac_in = (
+                    last_obs[np.newaxis, :],
+                    last_done[np.newaxis, :],
+                )
+                hstate, pi, value = network.apply(train_state.params, hstate, ac_in)
+
                 pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
 
                 rng, _rng = jax.random.split(rng)
@@ -260,46 +253,12 @@ def make_train(config):
                                           action_elevator[:, :, np.newaxis], 
                                           action_aileron[:, :, np.newaxis], 
                                           action_rudder[:, :, np.newaxis]], axis=-1)
-                return action, log_prob
 
-            def _env_step(runner_state, unused):
-                train_state, env_state, last_obs, last_done, ego_hstate, enm_hstate, rng = runner_state
-
-                # SELECT EGO ACTION
-                ego_ac_in = (
-                    last_obs[np.newaxis, :config["NUM_ALLIES"] * config["NUM_ENVS"]],
-                    last_done[np.newaxis, :config["NUM_ALLIES"] * config["NUM_ENVS"]],
+                value, action, log_prob = (
+                    value.squeeze(0),
+                    action.squeeze(0),
+                    log_prob.squeeze(0),
                 )
-                ego_hstate, ego_pi, ego_value = network.apply(train_state.params, ego_hstate, ego_ac_in)
-
-                rng, _rng = jax.random.split(rng)
-
-                ego_action, ego_log_prob = _get_actions(_rng, ego_pi)
-
-                ego_value, ego_action, ego_log_prob = (
-                    ego_value.squeeze(0),
-                    ego_action.squeeze(0),
-                    ego_log_prob.squeeze(0),
-                )
-
-                # SELECT ENM ACTION
-                enm_ac_in = (
-                    last_obs[np.newaxis, config["NUM_ALLIES"] * config["NUM_ENVS"]:],
-                    last_done[np.newaxis, config["NUM_ALLIES"] * config["NUM_ENVS"]:],
-                )
-                enm_hstate, enm_pi, enm_value = enm_network.apply(enm_network_params, enm_hstate, enm_ac_in)
-
-                rng, _rng = jax.random.split(rng)
-
-                enm_action, enm_log_prob = _get_actions(_rng, enm_pi)
-
-                enm_value, enm_action, enm_log_prob = (
-                    enm_value.squeeze(0),
-                    enm_action.squeeze(0),
-                    enm_log_prob.squeeze(0),
-                )
-
-                action = jnp.vstack((ego_action, enm_action))
 
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
@@ -310,31 +269,26 @@ def make_train(config):
                   unbatchify(action, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]))
                 reward = batchify(reward, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
                 transition = Transition(
-                    last_done[:config["NUM_ALLIES"] * config["NUM_ENVS"]], 
-                    ego_action, 
-                    ego_value, 
-                    reward[:config["NUM_ALLIES"] * config["NUM_ENVS"]], 
-                    ego_log_prob, 
-                    last_obs[:config["NUM_ALLIES"] * config["NUM_ENVS"]], 
-                    info
+                    last_done, action, value, reward, log_prob, last_obs, info
                 )
+                jax.debug.breakpoint()
                 obsv = batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
                 done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
-                runner_state = (train_state, env_state, obsv, done, ego_hstate, enm_hstate, rng)
+                runner_state = (train_state, env_state, obsv, done, hstate, rng)
                 return runner_state, transition
 
-            initial_hstate = runner_state[-3]
+            initial_hstate = runner_state[-2]
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
 
             # CALCULATE ADVANTAGE
-            train_state, env_state, last_obs, last_done, ego_hstate, enm_hstate, rng = runner_state
-            ego_ac_in = (
-                last_obs[np.newaxis, :config["NUM_ALLIES"] * config["NUM_ENVS"]],
-                last_done[np.newaxis, :config["NUM_ALLIES"] * config["NUM_ENVS"]],
+            train_state, env_state, last_obs, last_done, hstate, rng = runner_state
+            ac_in = (
+                last_obs[np.newaxis, :],
+                last_done[np.newaxis, :],
             )
-            _, _, last_val = network.apply(train_state.params, ego_hstate, ego_ac_in)
+            _, _, last_val = network.apply(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze(0)
 
             def _calculate_gae(traj_batch, last_val):
@@ -503,7 +457,7 @@ def make_train(config):
             rng = update_state[-1]
             metric["update_steps"] = update_steps
             if config.get("DEBUG"):
-                def log_callback(metric):
+                def callback(metric):
                     env_steps = metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"]
                     for k, v in metric["loss"].items():
                         writer.add_scalar('loss/{}'.format(k), v, env_steps)
@@ -516,51 +470,10 @@ def make_train(config):
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
                         metric["success"][metric["returned_episode"]].mean(),
                     ))
-                jax.experimental.io_callback(log_callback, None, metric)
-            
-            # SAVE NETWORK
-            def save_model_callback(params):
-                network_params, update_steps = params
-                ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-                checkpoint = {
-                    "params": network_params,
-                }
-                checkpoint_path = os.path.abspath(os.path.join(config["SAVEDIR"], f"checkpoint_epoch_{update_steps}"))
-                ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
-                ckptr.wait_until_finished()
-                print(f"Checkpoint saved at epoch {update_steps}")
-            jax.experimental.io_callback(save_model_callback, 
-                                         None, 
-                                         (train_state.params, update_steps), 
-                                         ordered=True)
-
-            # LOAD OPPONENT POLICY
-            def load_model_callback(params):
-                network_params, update_steps, rng = params
-                ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-                rng, _rng = jax.random.split(rng)
-                choose_idx = jax.random.choice(_rng, jnp.arange(update_steps + 1))
-                state = {"params": network_params}
-                checkpoint_path = os.path.abspath(os.path.join(config["SAVEDIR"], f"checkpoint_epoch_{choose_idx}"))
-                checkpoint = ckptr.restore(checkpoint_path, args=ocp.args.StandardRestore(item=state))
-                return checkpoint["params"]
-            rng, _rng = jax.random.split(rng)
-            def make_shape_dtype(pytree):
-                return jax.tree_util.tree_map(
-                    lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype),
-                    pytree
-                )
-            params_spec = make_shape_dtype(enm_network_params)
-            enm_network_params = jax.experimental.io_callback(
-                load_model_callback, 
-                params_spec, 
-                (enm_network_params, update_steps, _rng), 
-                ordered=True)
-            
-            update_steps = update_steps + 1
-            enm_hstate = ScannedRNN.initialize_carry(config["NUM_ENEMIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])    
-            runner_state = (train_state, env_state, last_obs, last_done, ego_hstate, enm_hstate, rng)
-            return (runner_state, update_steps, enm_network_params), metric
+                jax.experimental.io_callback(callback, None, metric)
+            update_steps = update_steps + 1    
+            runner_state = (train_state, env_state, last_obs, last_done, hstate, rng)
+            return (runner_state, update_steps), metric
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -568,12 +481,11 @@ def make_train(config):
             env_state,
             batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]),
             jnp.zeros((config["NUM_ENVS"] * config["NUM_ACTORS"]), dtype=bool),
-            init_ego_hstate,
-            init_enm_hstate,
+            init_hstate,
             _rng,
         )
         runner_state, metric = jax.lax.scan(
-            _update_step, (runner_state, start_epoch, enm_network_params), None, config["NUM_UPDATES"]
+            _update_step, (runner_state, start_epoch), None, config["NUM_UPDATES"]
         )
         return {"runner_state": runner_state, "metric": metric}
 
@@ -609,18 +521,18 @@ config = {
 }
 
 seed = config['SEED']
-wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
-wandb.init(
-    # set the wandb project where this run will be logged
-    project="AeroPlanax",
-    # track hyperparameters and run metadata
-    config=config,
-    name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
-    group=config['GROUP'],
-    notes='singlecombat selfplay',
-    # dir=config['LOGDIR'],
-    reinit=True,
-)
+# wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
+# wandb.init(
+#     # set the wandb project where this run will be logged
+#     project="AeroPlanax",
+#     # track hyperparameters and run metadata
+#     config=config,
+#     name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
+#     group=config['GROUP'],
+#     notes='singlecombat selfplay',
+#     # dir=config['LOGDIR'],
+#     reinit=True,
+# )
 
 output_dir = config["OUTPUTDIR"]
 Path(output_dir).mkdir(parents=True, exist_ok=True)
