@@ -131,10 +131,11 @@ def test(config, rng):
     env = AeroPlanaxCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
+    rng = jax.random.PRNGKey(config['SEED'])
 
     # init model
     network = ActorCriticRNN([31, 41, 41, 41], config=config)
-    rng = jax.random.PRNGKey(config['SEED'])
+    rng, _rng = jax.random.split(rng)
     init_x = (
         jnp.zeros(
             (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
@@ -142,7 +143,7 @@ def test(config, rng):
         jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
     )
     init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-    network_params = network.init(rng, init_hstate, init_x)
+    network_params = network.init(_rng, init_hstate, init_x)
     if config["ANNEAL_LR"]:
         tx = optax.chain(
             optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),

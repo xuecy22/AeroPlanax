@@ -17,8 +17,7 @@ from flax.training.train_state import TrainState
 import distrax
 import optax
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
-from envs.aeroplanax_combat_with_missile import AeroPlanaxCombatwithMissileEnv, CombatwithMissileTaskParams
+from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -73,11 +72,22 @@ class ActorCriticRNN(nn.Module):
             self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
         )(embedding)
         actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(
-            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        actor_throttle_mean = nn.Dense(
+            self.action_dim[0], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
-        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
+        actor_elevator_mean = nn.Dense(
+            self.action_dim[1], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_aileron_mean = nn.Dense(
+            self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_rudder_mean = nn.Dense(
+            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
+        pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
+        pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
+        pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
 
         critic = nn.Dense(
             self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
@@ -87,7 +97,7 @@ class ActorCriticRNN(nn.Module):
             critic
         )
 
-        return hidden, pi, jnp.squeeze(critic, axis=-1)
+        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder), jnp.squeeze(critic, axis=-1)
 
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -117,25 +127,38 @@ def test(config, rng):
         )
         return config["LR"] * frac
     # init env
-    # env_params = HeadingTaskParams()
-    # env = AeroPlanaxHeadingEnv(env_params)
-    env_params = CombatwithMissileTaskParams()
-    env = AeroPlanaxCombatwithMissileEnv(env_params)
+    env_params = CombatTaskParams()
+    env = AeroPlanaxCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
+    config['NUM_ALLIES'] = env.num_allies
+    config['NUM_ENEMIES'] = env.num_enemies
     rng = jax.random.PRNGKey(config['SEED'])
 
     # init model
-    network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
+    network = ActorCriticRNN([31, 41, 41, 41], config=config)
     rng, _rng = jax.random.split(rng)
     init_x = (
         jnp.zeros(
-            (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
+            (1, config["NUM_ENVS"] * config["NUM_ALLIES"], *env.observation_space(env.agents[0], env_params).shape)
         ),
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ALLIES"])),
     )
-    init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    init_hstate = ScannedRNN.initialize_carry(config["NUM_ALLIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
     network_params = network.init(_rng, init_hstate, init_x)
+
+    # INIT OPPONENT NETWORK
+    enm_network = ActorCriticRNN([31, 41, 41, 41], config=config)
+    rng, _rng = jax.random.split(rng)
+    init_x = (
+        jnp.zeros(
+            (1, config["NUM_ENVS"] * config["NUM_ENEMIES"], *env.observation_space(env.agents[0], env_params).shape)
+        ),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ENEMIES"])),
+    )
+    init_hstate = ScannedRNN.initialize_carry(config["NUM_ENEMIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    enm_network_params = enm_network.init(_rng, init_hstate, init_x)
+    
     if config["ANNEAL_LR"]:
         tx = optax.chain(
             optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -156,31 +179,78 @@ def test(config, rng):
         ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
         checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
         network_params = checkpoint["params"]
+        enm_network_params = checkpoint["params"]
 
     # INIT ENV
     rng, _rng = jax.random.split(rng)
     reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
     obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
     env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
-    init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    ego_init_hstate = ScannedRNN.initialize_carry(config["NUM_ALLIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    enm_init_hstate = ScannedRNN.initialize_carry(config["NUM_ENEMIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
     # TEST LOOP
+    def _get_actions(rng, pi):
+        pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+
+        rng, _rng = jax.random.split(rng)
+        action_throttle = pi_throttle.sample(seed=_rng)
+        rng, _rng = jax.random.split(rng)
+        action_elevator = pi_elevator.sample(seed=_rng)
+        rng, _rng = jax.random.split(rng)
+        action_aileron = pi_aileron.sample(seed=_rng)
+        rng, _rng = jax.random.split(rng)
+        action_rudder = pi_rudder.sample(seed=_rng)
+        log_prob_throttle = pi_throttle.log_prob(action_throttle)
+        log_prob_elevator = pi_elevator.log_prob(action_elevator)
+        log_prob_aileron = pi_aileron.log_prob(action_aileron)
+        log_prob_rudder = pi_rudder.log_prob(action_rudder)
+
+        log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
+
+        action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
+                                    action_elevator[:, :, np.newaxis], 
+                                    action_aileron[:, :, np.newaxis], 
+                                    action_rudder[:, :, np.newaxis]], axis=-1)
+        return action, log_prob
 
     def _env_step(test_state):
-        env_state, last_obs, last_done, hstate, rng = test_state
+        env_state, last_obs, last_done, ego_hstate, enm_hstate, rng = test_state
+        # SELECT EGO ACTION
+        ego_ac_in = (
+            last_obs[np.newaxis, :config["NUM_ALLIES"] * config["NUM_ENVS"]],
+            last_done[np.newaxis, :config["NUM_ALLIES"] * config["NUM_ENVS"]],
+        )
+        ego_hstate, ego_pi, ego_value = network.apply(network_params, ego_hstate, ego_ac_in)
+
         rng, _rng = jax.random.split(rng)
-        ac_in = (
-            last_obs[np.newaxis, :],
-            last_done[np.newaxis, :],
+
+        ego_action, ego_log_prob = _get_actions(_rng, ego_pi)
+
+        ego_value, ego_action, ego_log_prob = (
+            ego_value.squeeze(0),
+            ego_action.squeeze(0),
+            ego_log_prob.squeeze(0),
         )
-        hstate, pi, value = network.apply(network_params, hstate, ac_in)
-        action = pi.sample(seed=_rng)
-        log_prob = pi.log_prob(action)
-        value, action, log_prob = (
-            value.squeeze(0),
-            action.squeeze(0),
-            log_prob.squeeze(0),
+
+        # SELECT ENM ACTION
+        enm_ac_in = (
+            last_obs[np.newaxis, config["NUM_ALLIES"] * config["NUM_ENVS"]:],
+            last_done[np.newaxis, config["NUM_ALLIES"] * config["NUM_ENVS"]:],
         )
+        enm_hstate, enm_pi, enm_value = enm_network.apply(enm_network_params, enm_hstate, enm_ac_in)
+
+        rng, _rng = jax.random.split(rng)
+
+        enm_action, enm_log_prob = _get_actions(_rng, enm_pi)
+
+        enm_value, enm_action, enm_log_prob = (
+            enm_value.squeeze(0),
+            enm_action.squeeze(0),
+            enm_log_prob.squeeze(0),
+        )
+
+        action = jnp.vstack((ego_action, enm_action))
 
         # STEP ENV
         rng, _rng = jax.random.split(rng)
@@ -192,11 +262,17 @@ def test(config, rng):
         env.render(env_state.env_state, env_params, done, './tracks/')
         reward = batchify(reward, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
         transition = Transition(
-            last_done, action, value, reward, log_prob, last_obs, info
+            last_done[:config["NUM_ALLIES"] * config["NUM_ENVS"]], 
+            ego_action, 
+            ego_value, 
+            reward[:config["NUM_ALLIES"] * config["NUM_ENVS"]], 
+            ego_log_prob, 
+            last_obs[:config["NUM_ALLIES"] * config["NUM_ENVS"]], 
+            info
         )
         obsv = batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
         done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
-        test_state = (env_state, obsv, done, hstate, rng)
+        test_state = (env_state, obsv, done, ego_hstate, enm_hstate, rng)
         return test_state, transition
 
     rng, _rng = jax.random.split(rng)
@@ -204,13 +280,14 @@ def test(config, rng):
         env_state,
         batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]),
         jnp.zeros((config["NUM_ENVS"] * config["NUM_ACTORS"]), dtype=bool),
-        init_hstate,
+        ego_init_hstate,
+        enm_init_hstate,
         _rng,
     )
-    for _ in range(20):
+    for _ in range(100):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
-        print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}')
+        print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}, Episodic_return: {test_state[0].returned_episode_returns}')
         
     return {"test_state": test_state, "trajectory": traj_batch}
 
@@ -219,7 +296,7 @@ config = {
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 1,
-    "NUM_ACTORS": 1,
+    "NUM_ACTORS": 2,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -232,7 +309,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-03-00-55/checkpoints/checkpoint_epoch_1000" 
+    "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-15-14-10/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)
