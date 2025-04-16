@@ -66,7 +66,7 @@ class FormationTaskParams(EnvParams):
     min_altitude: float = 4200.0
     max_vt: float = 360.0
     min_vt: float = 120.0
-    max_heading_increment: float = jnp.pi  # 最大航向变化量(π≈180°)
+    max_heading_increment: float = jnp.pi/6  # 最大航向变化量(π≈180°)
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
     noise_scale: float = 0.0
@@ -96,7 +96,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         self.termination_conditions = [
             crashed_fn,
             timeout_fn,
-            unreach_heading_fn,
+            # unreach_heading_fn,
             unreach_formation_fn,
         ]
 
@@ -109,7 +109,8 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         # 前5次任务切换时增量系数逐步增大（0.2→1.0），后续保持1.0不变
 
     def _get_obs_size(self) -> int:
-        return 19
+        # return 19
+        return 16
 
     @property
     def default_params(self) -> FormationTaskParams:
@@ -139,13 +140,13 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
         vel_x = vt
 
-        # key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=params.max_heading_increment, maxval=params.max_heading_increment)
+        key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
+        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=params.max_heading_increment, maxval=params.max_heading_increment)
         # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
         # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
 
         # target_altitude = state.plane_state.altitude + delta_altitude
-        # target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
+        target_heading = wrap_PI(state.plane_state.yaw + delta_heading)
 
 
         state = state.replace(
@@ -154,9 +155,12 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
                 vt=vt,
             ),
             formation_positions=formation_positions,
-            target_heading=state.plane_state.yaw,  # 初始目标航向=当前航向
-            target_altitude=state.plane_state.altitude, # 目标高度=当前高度
-            target_vt=vt,                     # 目标速度=随机初始速度
+            # target_heading=state.plane_state.yaw,  # 初始目标航向=当前航向
+            # target_altitude=state.plane_state.altitude, # 目标高度=当前高度
+            # target_vt=vt,                     # 目标速度=随机初始速度
+            target_heading=target_heading,
+            target_altitude=state.plane_state.altitude,
+            target_vt=vt,
         )
         return state
 
@@ -168,40 +172,40 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             formation_positions=state.formation_positions.at[:, 0].set(state.formation_positions[:, 0] + delta_distance)
         )
 
-        ############### aeroplanax_heading.py 任务 ############################
+        # ############### aeroplanax_heading.py 任务 ############################
 
-        delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
-        key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
-         # 随机航向变化量(-π, π)
-        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
-        #  # 高度变化量(±2100m)
-        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
-        # # 速度变化量(±100m/s)
-        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
+        # delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
+        # key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
+        # delta = self.increment_size[state.heading_turn_counts] # 渐进式增量系数
+        #  # 随机航向变化量(-π, π)
+        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
+        # #  # 高度变化量(±2100m)
+        # # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
+        # # # 速度变化量(±100m/s)
+        # # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
 
-        target_altitude = state.target_altitude
-        target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
-        target_vt = state.target_vt
+        # target_altitude = state.target_altitude
+        # target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)
+        # target_vt = state.target_vt
 
-        ############### aeroplanax_heading.py 任务 ############################
+        # ############### aeroplanax_heading.py 任务 ############################
 
-        new_state = state.replace(
-            plane_state=state.plane_state.replace(
-                status=jnp.where(state.plane_state.is_success, 0, state.plane_state.status)
-            ),
-            success=False,
-            target_heading=target_heading,
-            target_altitude=target_altitude,
-            target_vt=target_vt,
-            last_check_time=state.time,
-            heading_turn_counts=(state.heading_turn_counts + 1),
-        )
-        state = jax.lax.cond(state.success, lambda: new_state, lambda: state)
-        info["heading_turn_counts"] = state.heading_turn_counts
-        info["target_heading"] = state.target_heading
-        num_crashed = jnp.sum(jnp.logical_not(state.plane_state.is_alive))
-        info["num_crashes"] = num_crashed # 统计多少架飞机已经是“死亡”或“坠毁”状态
+        # new_state = state.replace(
+        #     plane_state=state.plane_state.replace(
+        #         status=jnp.where(state.plane_state.is_success, 0, state.plane_state.status)
+        #     ),
+        #     success=False,
+        #     target_heading=target_heading,
+        #     target_altitude=target_altitude,
+        #     target_vt=target_vt,
+        #     last_check_time=state.time,
+        #     heading_turn_counts=(state.heading_turn_counts + 1),
+        # )
+        # state = jax.lax.cond(state.success, lambda: new_state, lambda: state)
+        # info["heading_turn_counts"] = state.heading_turn_counts
+        # info["target_heading"] = state.target_heading
+        # num_crashed = jnp.sum(jnp.logical_not(state.plane_state.is_alive))
+        # info["num_crashes"] = num_crashed # 统计多少架飞机已经是“死亡”或“坠毁”状态
 
         return state, info
 
@@ -246,9 +250,9 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         # 计算归一化的观测值
         ############################################################
         # formation特有的观测值
-        norm_delta_north = (north - state.formation_positions[:, 0]) / 1000
-        norm_delta_east = (east - state.formation_positions[:, 1]) / 1000
-        norm_delta_altitude_formation = (altitude - state.formation_positions[:, 2]) / 1000
+        # norm_delta_north = (north - state.formation_positions[:, 0]) / 1000
+        # norm_delta_east = (east - state.formation_positions[:, 1]) / 1000
+        # norm_delta_altitude_formation = (altitude - state.formation_positions[:, 2]) / 1000
         ############################################################
 
         ############################################################
@@ -273,20 +277,20 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
 
         ############################################################
         # 用heading policy测试多机编队
-        # obs = jnp.vstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
-        #                     norm_altitude, norm_vt,
-        #                     roll_sin, roll_cos, pitch_sin, pitch_cos,
-        #                     alpha_sin, alpha_cos, beta_sin, beta_cos,
-        #                     P, Q, R))
-        ############################################################
-        # formation policy训练用
         obs = jnp.vstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
                             norm_altitude, norm_vt,
                             roll_sin, roll_cos, pitch_sin, pitch_cos,
                             alpha_sin, alpha_cos, beta_sin, beta_cos,
-                            P, Q, R,
-                            norm_delta_north, norm_delta_east, norm_delta_altitude_formation)
-                            )
+                            P, Q, R))
+        ############################################################
+        # formation policy训练用
+        # obs = jnp.vstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
+        #                     norm_altitude, norm_vt,
+        #                     roll_sin, roll_cos, pitch_sin, pitch_cos,
+        #                     alpha_sin, alpha_cos, beta_sin, beta_cos,
+        #                     P, Q, R,
+        #                     norm_delta_north, norm_delta_east, norm_delta_altitude_formation)
+        #                     )
 
         ############################################################
         return {agent: obs[:, i] for i, agent in enumerate(self.agents)}

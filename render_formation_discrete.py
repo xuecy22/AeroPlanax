@@ -18,7 +18,8 @@ import distrax
 import optax
 from envs.wrappers import LogWrapper
 # from envs.aeroplanax_turning_maneuverability_test import AeroPlanax_turning_maneuverability_Env, turning_maneuverability_TaskParams
-from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams
+# from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams
+from envs.aeroplanax_formation_test import AeroPlanaxFormationEnv, FormationTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -171,14 +172,60 @@ def test(config, rng):
     env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
     init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
-    # TEST LOOP
+    #####################################################################################################################################################################
+    # 只取第 1 个agent(比如 ally_0) 的 obs/done，然后把它在 batch 维度上重复 5 次(或 你 config["NUM_ACTORS"])
+    def single_agent_batchify(x: dict, first_agent, num_envs, num_actors):
+        """
+        仅取第1个agent的观测/done，并在batch维度上复制num_actors份
+        """
+        # x是 {agent_name: obs_array, ...}
+        obs_first = x[first_agent]  # shape (obs_dim,)
+        # 在多环境时，可能 shape=(num_envs, obs_dim)
+        # 如果是multi-env => x[ally_0] shape = (num_envs, obs_dim)
+        # 保持一致
 
+        # expand to (num_envs, 1, obs_dim) → tile => (num_envs, num_actors, obs_dim)
+        obs_first = obs_first[:, jnp.newaxis, :]    # (num_envs, 1, obs_dim)
+        obs_first = jnp.tile(obs_first, (1, num_actors, 1))  # => (num_envs, num_actors, obs_dim)
+
+        # reshape => (num_envs*num_actors, obs_dim)
+        obs_batch = obs_first.reshape(num_envs * num_actors, -1)
+        return obs_batch
+
+    #####################################################################################################################################################################
     def _env_step(test_state):
         env_state, last_obs, last_done, hstate, rng = test_state
-        ac_in = (
-            last_obs[np.newaxis, :],
-            last_done[np.newaxis, :],
+
+        ##############################################################################################################
+        # 1) Single-agent batchify
+        #    仅使用第 1 个智能体的观测, replicate 5 份
+        obs_dict = unbatchify(last_obs, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
+        single_obs_batch = single_agent_batchify(
+            obs_dict,
+            env.agents[0],
+            config["NUM_ENVS"],
+            config["NUM_ACTORS"]
         )
+
+        done_dict = unbatchify(last_done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
+        single_done_batch = single_agent_batchify(
+            done_dict,
+            env.agents[0],
+            config["NUM_ENVS"],
+            config["NUM_ACTORS"]
+        ).squeeze(-1)
+        
+
+        ac_in = (single_obs_batch[np.newaxis, :], single_done_batch[np.newaxis, :])
+        ##############################################################################################################
+
+        # ac_in = (
+        #     last_obs[np.newaxis, :],
+        #     last_done[np.newaxis, :],
+        # )
+
+        ##############################################################################################################
+
         hstate, pi, value = network.apply(network_params, hstate, ac_in)
 
         pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
@@ -225,7 +272,7 @@ def test(config, rng):
         done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
         test_state = (env_state, obsv, done, hstate, rng)
         return test_state, transition
-
+    did_batchify = jnp.logical_not(did_batchify) # batchify the first time
     rng, _rng = jax.random.split(rng)
     test_state = (
         env_state,

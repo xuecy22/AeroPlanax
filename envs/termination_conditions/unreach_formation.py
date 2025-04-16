@@ -10,7 +10,7 @@ def unreach_formation_fn(
     state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
-    max_check_interval: int = 100,
+    max_check_interval: int = 50,
     min_check_interval: int = 2
 ) -> Tuple[bool, bool]:
 
@@ -28,6 +28,7 @@ def unreach_formation_fn(
     mask3 = distance < 100
     # success = mask1 & mask2 & mask3
     success = mask1 & mask3
+    # success = False # 永远不会结束，success的判断放在unreach heading里面，unreach_formation只判断是否距离超过100
     # 任务成功或超时, 则任务结束
     # done = success | jnp.logical_not(mask1)
     # 任务超时, 则任务结束
