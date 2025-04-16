@@ -118,7 +118,7 @@ def quaternion_to_rpy(q0, q1, q2, q3):
         注意：这里传入的四元数是 q_{NED}^{Body}，即从机体系到NED系的四元数。
         roll    Range [-180,180)
         pitch   Range [-90,90]
-        yaw     Range [0,360)
+        yaw     Range [-180,180)
     '''
     sinr_cosp = 2.0 * (q0*q1 + q2*q3)
     cosr_cosp = 1.0 - 2.0 * (q1*q1 + q2*q2)
