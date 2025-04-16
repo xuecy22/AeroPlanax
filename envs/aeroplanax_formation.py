@@ -285,7 +285,7 @@ class AeroPlanaxFormationEnv(MulAeroPlanaxEnv):
 
         self.termination_conditions = [
             crashed_fn,
-            functools.partial(unreach_formation_fn, min_check_interval=20, max_check_interval=100, valid_distance=200),
+            functools.partial(unreach_formation_fn, min_check_interval=20, max_check_interval=100, valid_distance=50),
         ]
     
     @property

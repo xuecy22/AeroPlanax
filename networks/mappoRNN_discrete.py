@@ -4,6 +4,7 @@ import distrax
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
+import orbax.checkpoint as ocp
 from typing import Sequence, Dict, Tuple, List, Any
 from flax.linen.initializers import constant, orthogonal
 
@@ -109,4 +110,24 @@ def init_network(env : LogWrapper, config : Dict[str, Any]):
         tx=tx,
     )
 
-    return (actor_network, critic_network), (ac_train_state, cr_train_state)
+    if "LOADDIR" in config:
+        state = {
+            "actor_params": ac_train_state.params,
+            "actor_opt_state": ac_train_state.opt_state,
+            "critic_params": cr_train_state.params,
+            "critic_opt_state": cr_train_state.opt_state,
+            "epoch": jnp.array(0)
+        }
+        checkpoint = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler()).restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
+
+        actor_params, actor_opt_state = checkpoint["actor_params"], checkpoint["actor_opt_state"]
+        ac_train_state = ac_train_state.replace(params=actor_params, opt_state=actor_opt_state)
+
+        critic_params, critic_opt_state = checkpoint["critic_params"], checkpoint["critic_opt_state"]
+        cr_train_state = cr_train_state.replace(params=critic_params, opt_state=critic_opt_state)
+        
+        start_epoch = checkpoint["epoch"]
+    else:
+        start_epoch = 0
+
+    return (actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch

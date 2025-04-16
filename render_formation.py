@@ -1,158 +1,60 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+# os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
 import numpy as np
-import matplotlib.pyplot as plt
-from pathlib import Path
-from datetime import datetime
-from flax.linen.initializers import constant, orthogonal
-import functools
 from typing import Sequence, NamedTuple, Any, Dict
-from flax.training import checkpoints
-from flax.training.train_state import TrainState
-import distrax
-import optax
-from envs.wrappers import LogWrapper
-from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams
-import orbax.checkpoint as ocp
+from envs.wrappers_mul import LogWrapper
+from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams, FormationTaskState
 
-
-class ScannedRNN(nn.Module):
-    @functools.partial(
-        nn.scan,
-        variable_broadcast="params",
-        in_axes=0,
-        out_axes=0,
-        split_rngs={"params": False},
-    )
-    @nn.compact
-    def __call__(self, carry, x):
-        """Applies the module."""
-        rnn_state = carry
-        ins, resets = x
-        rnn_state = jnp.where(
-            resets[:, np.newaxis],
-            self.initialize_carry(*rnn_state.shape),
-            rnn_state,
-        )
-        new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
-        return new_rnn_state, y
-
-    @staticmethod
-    def initialize_carry(batch_size, hidden_size):
-        # Use a dummy key since the default state init fn is just zeros.
-        cell = nn.GRUCell(features=hidden_size)
-        return cell.initialize_carry(jax.random.PRNGKey(0), (batch_size, hidden_size))
-
-
-class ActorCriticRNN(nn.Module):
-    action_dim: Sequence[int]
-    config: Dict
-
-    @nn.compact
-    def __call__(self, hidden, x):
-        if self.config["ACTIVATION"] == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-        obs, dones = x
-        embedding = nn.Dense(
-            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(obs)
-        embedding = activation(embedding)
-
-        rnn_in = (embedding, dones)
-        hidden, embedding = ScannedRNN()(hidden, rnn_in)
-
-        actor_mean = nn.Dense(
-            self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
-        )(embedding)
-        actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(
-            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
-        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
-
-        critic = nn.Dense(
-            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
-        )(embedding)
-        critic = activation(critic)
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
-            critic
-        )
-
-        return hidden, pi, jnp.squeeze(critic, axis=-1)
-
+from networks import (
+    init_network_mappoRNN_discrete,
+    ScannedRNN,
+    unzip_discrete_action
+)
+from maketrains.utils import batchify, unbatchify
 class Transition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
-    value: jnp.ndarray
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     info: jnp.ndarray
 
-def batchify(x: dict, agent_list, num_envs, num_actors):
-    x = jnp.stack([x[a] for a in agent_list])
-    # print('batchify', x.shape)
-    return x.reshape((num_actors * num_envs, -1))
+env_params = FormationTaskParams()
+env = AeroPlanaxFormationEnv(env_params)
 
+config = {
+    "SEED": 42,
+    "LR": 3e-4,
+    "NUM_ENVS": 1,
+    "NUM_ACTORS": env.num_agents,
+    "FC_DIM_SIZE": 128,
+    "GRU_HIDDEN_DIM": 128,
+    "UPDATE_EPOCHS": 16,
+    "NUM_MINIBATCHES": 5,
+    "GAMMA": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 1e-3,
+    "VF_COEF": 1,
+    "MAX_GRAD_NORM": 2,
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": False,
+    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\baselines\\form_0415_cp560" 
+    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-02-18-17/checkpoints/checkpoint_epoch_1000" 
+}
 
-def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
-    x = x.reshape((num_actors, num_envs, -1))
-    return {a: x[i] for i, a in enumerate(agent_list)}
+env = LogWrapper(env)
+(network, _), (ac_train_state, _), _ = init_network_mappoRNN_discrete(env, config)
 
-def test(config, rng):
-    def linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["LR"] * frac
-    # init env
-    env_params = FormationTaskParams()
-    env = AeroPlanaxFormationEnv(env_params)
-    env = LogWrapper(env)
-    config["NUM_ACTORS"] = env.num_agents
+network_params = ac_train_state.params
 
-    # init model
-    network = ActorCriticRNN(env.action_space(env.agents[0], env_params).shape[0], config=config)
+def test(config):
     rng = jax.random.PRNGKey(config['SEED'])
-    init_x = (
-        jnp.zeros(
-            (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
-        ),
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
-    )
-    init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-    network_params = network.init(rng, init_hstate, init_x)
-    if config["ANNEAL_LR"]:
-        tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(learning_rate=linear_schedule, eps=1e-5),
-        )
-    else:
-        tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(config["LR"], eps=1e-5),
-        )
-    train_state = TrainState.create(
-        apply_fn=network.apply,
-        params=network_params,
-        tx=tx,
-    )
-    if "LOADDIR" in config:
-        state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
-        ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-        checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
-        network_params = checkpoint["params"]
-
     # INIT ENV
     rng, _rng = jax.random.split(rng)
     reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
@@ -169,11 +71,11 @@ def test(config, rng):
             last_obs[np.newaxis, :],
             last_done[np.newaxis, :],
         )
-        hstate, pi, value = network.apply(network_params, hstate, ac_in)
-        action = pi.sample(seed=_rng)
-        log_prob = pi.log_prob(action)
-        value, action, log_prob = (
-            value.squeeze(0),
+        hstate, pi = network.apply(network_params, hstate, ac_in)
+
+        rng, action, log_prob = unzip_discrete_action(_rng, pi)
+        
+        action, log_prob = (
             action.squeeze(0),
             log_prob.squeeze(0),
         )
@@ -188,10 +90,14 @@ def test(config, rng):
         env.render(env_state.env_state, env_params, done, './tracks/')
         reward = batchify(reward, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
         transition = Transition(
-            last_done, action, value, reward, log_prob, last_obs, info
+            last_done, action, reward, log_prob, last_obs, info
         )
         obsv = batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
         done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
+        
+        mask = jnp.reshape(1.0 - done, (-1, 1))
+        hstate = hstate * mask
+
         test_state = (env_state, obsv, done, hstate, rng)
         return test_state, transition
 
@@ -203,32 +109,22 @@ def test(config, rng):
         init_hstate,
         _rng,
     )
-    for _ in range(10):
+    while True:
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
-        print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}')
+        assert isinstance(env_state, FormationTaskState)
+
+        delta_N = env_state.plane_state.north - env_state.formation_positions[:,:,0]
+        delta_E = env_state.plane_state.east - env_state.formation_positions[:,:,1]
+        delta_alt = env_state.plane_state.altitude - env_state.formation_positions[:,:,2]
+        delta_heading = env_state.plane_state.yaw - env_state.target_heading
+        delta_vt = env_state.plane_state.vt - env_state.target_vt
+
+        distance = (delta_N**2+delta_E**2+delta_alt**2)**(1/2)
+
+        print(f't: {env_state.time}, distance: {distance}, alive: {env_state.plane_state.is_crashed}, Done: {env_state.done}, Reward: {traj_batch.reward}')
+
         
     return {"test_state": test_state, "trajectory": traj_batch}
 
-
-config = {
-    "SEED": 42,
-    "LR": 3e-4,
-    "NUM_ENVS": 1,
-    "NUM_ACTORS": 200,
-    "FC_DIM_SIZE": 128,
-    "GRU_HIDDEN_DIM": 128,
-    "UPDATE_EPOCHS": 16,
-    "NUM_MINIBATCHES": 5,
-    "GAMMA": 0.99,
-    "GAE_LAMBDA": 0.95,
-    "CLIP_EPS": 0.2,
-    "ENT_COEF": 1e-3,
-    "VF_COEF": 1,
-    "MAX_GRAD_NORM": 2,
-    "ACTIVATION": "relu",
-    "ANNEAL_LR": False,
-    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-02-18-17/checkpoints/checkpoint_epoch_1000" 
-}
-rng = jax.random.PRNGKey(42)
-out = test(config, rng)
+out = test(config)
