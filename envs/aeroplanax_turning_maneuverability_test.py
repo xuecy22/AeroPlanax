@@ -121,7 +121,7 @@ class AeroPlanax_turning_maneuverability_Env(AeroPlanaxEnv[turning_maneuverabili
         ]
 
         # 课程学习：
-        self.increment_size = jnp.array([0.8, 1.0, 1.2, 1.4, 1.6] + [1.6] * 10)
+        self.increment_size = jnp.array([1.0, 3.0, 5.0, 10.0, 15.0] + [15.0] * 10)
         # 前5个元素是 [0.2, 0.4, 0.6, 0.8, 1.0]
         # 后10个元素是 [1.0] 重复10次
         # 该数组用于控制航向/高度/速度变化量的增量系数
