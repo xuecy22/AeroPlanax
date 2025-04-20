@@ -142,7 +142,7 @@ def test(config, rng):
         ),
         jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
     )
-    init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"] * config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
     network_params = network.init(rng, init_hstate, init_x)
     if config["ANNEAL_LR"]:
         tx = optax.chain(
@@ -170,14 +170,11 @@ def test(config, rng):
     reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
     obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
     env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
-    init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"] * config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
 
     #####################################################################################################################################################################
     # 只取第 1 个agent(比如 ally_0) 的 obs/done，然后把它在 batch 维度上重复 5 次(或 你 config["NUM_ACTORS"])
     def single_agent_batchify(x: dict, first_agent, num_envs, num_actors):
-        """
-        仅取第1个agent的观测/done，并在batch维度上复制num_actors份
-        """
         # x是 {agent_name: obs_array, ...}
         obs_first = x[first_agent]  # shape (obs_dim,)
         # 在多环境时，可能 shape=(num_envs, obs_dim)
@@ -185,8 +182,8 @@ def test(config, rng):
         # 保持一致
 
         # expand to (num_envs, 1, obs_dim) → tile => (num_envs, num_actors, obs_dim)
-        obs_first = obs_first[:, jnp.newaxis, :]    # (num_envs, 1, obs_dim)
-        obs_first = jnp.tile(obs_first, (1, num_actors, 1))  # => (num_envs, num_actors, obs_dim)
+        obs_first = obs_first[jnp.newaxis, :, :]    # (num_envs, 1, obs_dim)
+        obs_first = jnp.tile(obs_first, (num_actors, 1, 1))  # => (num_envs, num_actors, obs_dim)
 
         # reshape => (num_envs*num_actors, obs_dim)
         obs_batch = obs_first.reshape(num_envs * num_actors, -1)
@@ -196,33 +193,10 @@ def test(config, rng):
     def _env_step(test_state):
         env_state, last_obs, last_done, hstate, rng = test_state
 
-        ##############################################################################################################
-        # 1) Single-agent batchify
-        #    仅使用第 1 个智能体的观测, replicate 5 份
-        obs_dict = unbatchify(last_obs, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
-        single_obs_batch = single_agent_batchify(
-            obs_dict,
-            env.agents[0],
-            config["NUM_ENVS"],
-            config["NUM_ACTORS"]
+        ac_in = (
+            last_obs[np.newaxis, :],
+            last_done[np.newaxis, :],
         )
-
-        done_dict = unbatchify(last_done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
-        single_done_batch = single_agent_batchify(
-            done_dict,
-            env.agents[0],
-            config["NUM_ENVS"],
-            config["NUM_ACTORS"]
-        ).squeeze(-1)
-        
-
-        ac_in = (single_obs_batch[np.newaxis, :], single_done_batch[np.newaxis, :])
-        ##############################################################################################################
-
-        # ac_in = (
-        #     last_obs[np.newaxis, :],
-        #     last_done[np.newaxis, :],
-        # )
 
         ##############################################################################################################
 
@@ -246,14 +220,15 @@ def test(config, rng):
         log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
 
         action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
-                                    action_elevator[:, :, np.newaxis], 
-                                    action_aileron[:, :, np.newaxis], 
-                                    action_rudder[:, :, np.newaxis]], axis=-1)
+                                  action_elevator[:, :, np.newaxis], 
+                                  action_aileron[:, :, np.newaxis], 
+                                  action_rudder[:, :, np.newaxis]], axis=-1)
+        action = jnp.tile(action[:, 0, :], (config["NUM_ACTORS"],  1))
         
         value, action, log_prob = (
             value.squeeze(0),
-            action.squeeze(0),
-            log_prob.squeeze(0),
+            action,
+            log_prob,
         )
 
         # STEP ENV
@@ -272,7 +247,6 @@ def test(config, rng):
         done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
         test_state = (env_state, obsv, done, hstate, rng)
         return test_state, transition
-    did_batchify = jnp.logical_not(did_batchify) # batchify the first time
     rng, _rng = jax.random.split(rng)
     test_state = (
         env_state,
@@ -307,8 +281,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    # "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-06-14-42/checkpoints/checkpoint_epoch_1111" 
-    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-09-10-45/checkpoints/checkpoint_epoch_2111"
+    "LOADDIR": "/home/xcy/AeroPlanax-formation/envs/models/baseline"
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

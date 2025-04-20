@@ -137,11 +137,11 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         """Task-specific reset."""
         state, formation_positions = self._generate_formation(key, state, params)
         key, key_vt = jax.random.split(key)
-        vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
+        vt = jax.random.uniform(key_vt, minval=params.min_vt, maxval=params.max_vt) * jnp.ones_like(state.plane_state.vt)
         vel_x = vt
 
         key_heading, key_altitude_increment, key_vt_increment = jax.random.split(key, 3)
-        delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=params.max_heading_increment, maxval=params.max_heading_increment)
+        delta_heading = jax.random.uniform(key_heading, minval=params.max_heading_increment, maxval=params.max_heading_increment) * jnp.ones_like(state.plane_state.yaw)
         # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
         # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
 
