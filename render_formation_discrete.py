@@ -172,24 +172,6 @@ def test(config, rng):
     env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
     init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"] * config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
 
-    #####################################################################################################################################################################
-    # 只取第 1 个agent(比如 ally_0) 的 obs/done，然后把它在 batch 维度上重复 5 次(或 你 config["NUM_ACTORS"])
-    def single_agent_batchify(x: dict, first_agent, num_envs, num_actors):
-        # x是 {agent_name: obs_array, ...}
-        obs_first = x[first_agent]  # shape (obs_dim,)
-        # 在多环境时，可能 shape=(num_envs, obs_dim)
-        # 如果是multi-env => x[ally_0] shape = (num_envs, obs_dim)
-        # 保持一致
-
-        # expand to (num_envs, 1, obs_dim) → tile => (num_envs, num_actors, obs_dim)
-        obs_first = obs_first[jnp.newaxis, :, :]    # (num_envs, 1, obs_dim)
-        obs_first = jnp.tile(obs_first, (num_actors, 1, 1))  # => (num_envs, num_actors, obs_dim)
-
-        # reshape => (num_envs*num_actors, obs_dim)
-        obs_batch = obs_first.reshape(num_envs * num_actors, -1)
-        return obs_batch
-
-    #####################################################################################################################################################################
     def _env_step(test_state):
         env_state, last_obs, last_done, hstate, rng = test_state
 
