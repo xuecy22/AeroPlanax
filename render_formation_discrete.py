@@ -263,7 +263,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax-formation/envs/models/baseline"
+    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/envs/models/heading baseline"
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

@@ -55,7 +55,7 @@ class FormationTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class FormationTaskParams(EnvParams):
-    num_allies: int = 5
+    num_allies: int = 15
     num_enemies: int = 0
     agent_type: int = 0   # 0: fighterplane, 1: canardplane
     action_type: int = 1  # 0: continuous, 1: discrete
@@ -66,7 +66,7 @@ class FormationTaskParams(EnvParams):
     min_altitude: float = 4200.0
     max_vt: float = 360.0
     min_vt: float = 120.0
-    max_heading_increment: float = jnp.pi/6  # 最大航向变化量(π≈180°)
+    max_heading_increment: float = jnp.pi  # 最大航向变化量(π≈180°)
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
     noise_scale: float = 0.0
