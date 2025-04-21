@@ -166,9 +166,6 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=-params.max_heading_increment, maxval=params.max_heading_increment)
         delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=-params.max_altitude_increment, maxval=params.max_altitude_increment)
         delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=-params.max_velocities_u_increment, maxval=params.max_velocities_u_increment)
-        # delta_heading = jax.random.uniform(key_heading, shape=(self.num_agents,), minval=jnp.pi / 2, maxval=jnp.pi / 2)
-        # delta_altitude = jax.random.uniform(key_altitude_increment, shape=(self.num_agents,), minval=0, maxval=0)
-        # delta_vt = jax.random.uniform(key_vt_increment, shape=(self.num_agents,), minval=0, maxval=0)
 
         target_altitude = state.plane_state.altitude + delta_altitude * delta
         target_heading = wrap_PI(state.plane_state.yaw + delta_heading * delta)

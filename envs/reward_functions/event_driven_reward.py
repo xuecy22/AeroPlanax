@@ -13,5 +13,5 @@ def event_driven_reward_fn(
     - Done: +200
     - Bad_done: -200
     """
-    reward = state.success * success_reward + state.done * fail_reward
+    reward = state.done * (state.success * success_reward + (1 - state.success) * fail_reward)
     return reward

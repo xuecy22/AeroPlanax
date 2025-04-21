@@ -21,4 +21,5 @@ def safe_return_fn(
     allies = jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, alive, True)
     enemies = jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, True, die)
     success = jnp.all(allies) & jnp.all(enemies)
+    done = done | success
     return done, success

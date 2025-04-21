@@ -47,7 +47,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax/envs/models/baseline"
+    "LOADDIR": "/home/xcy/AeroPlanax-heading/envs/models/baseline"
 }
 
 
@@ -188,9 +188,9 @@ class CombatwithMissileTaskParams(EnvParams):
     min_altitude: float = 5800
     max_vt: float = 360
     min_vt: float = 300
-    max_heading_increment: float = 0.3
-    max_altitude_increment: float = 90
-    max_velocities_u_increment: float = 9
+    max_heading_increment: float = jnp.pi
+    max_altitude_increment: float = 0
+    max_velocities_u_increment: float = 0
     noise_scale: float = 0.0
     team_spacing: float = 15000       
     safe_distance: float = 3000

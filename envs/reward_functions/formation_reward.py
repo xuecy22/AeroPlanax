@@ -1,7 +1,5 @@
 import jax.numpy as jnp
-from jax import vmap
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
-from ..utils.utils import wrap_PI
 
 
 def formation_reward_fn(

@@ -17,8 +17,7 @@ from flax.training.train_state import TrainState
 import distrax
 import optax
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_heading import AeroPlanaxHeadingEnv, HeadingTaskParams
-from envs.aeroplanax_combat_with_missile import AeroPlanaxCombatwithMissileEnv, CombatwithMissileTaskParams
+from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -117,10 +116,8 @@ def test(config, rng):
         )
         return config["LR"] * frac
     # init env
-    # env_params = HeadingTaskParams()
-    # env = AeroPlanaxHeadingEnv(env_params)
-    env_params = CombatwithMissileTaskParams()
-    env = AeroPlanaxCombatwithMissileEnv(env_params)
+    env_params = FormationTaskParams()
+    env = AeroPlanaxFormationEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     rng = jax.random.PRNGKey(config['SEED'])
@@ -207,7 +204,7 @@ def test(config, rng):
         init_hstate,
         _rng,
     )
-    for _ in range(20):
+    for _ in range(10):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
         print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}')
@@ -219,7 +216,7 @@ config = {
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 1,
-    "NUM_ACTORS": 1,
+    "NUM_ACTORS": 200,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -232,7 +229,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-03-00-55/checkpoints/checkpoint_epoch_1000" 
+    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-02-18-17/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

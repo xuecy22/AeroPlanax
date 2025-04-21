@@ -1,9 +1,9 @@
 import os
 import yaml
-import math
 import jax.numpy as jnp
-import torch
 import jax
+
+
 a = 6378137
 b = 6356752.3142
 f = (a - b) / a
@@ -30,9 +30,6 @@ def parse_config(filename):
 
 def get_root_dir():
     return os.path.join(os.path.split(os.path.realpath(__file__))[0], '..')
-
-def _t2n(x):
-    return x.detach().cpu().numpy()
 
 def geodetic_to_ecef(lat, lon, h):
     # (lat, lon) in degrees
@@ -123,8 +120,8 @@ def ecef_to_geodetic(x, y, z):
     zo = (b2 * z) / (a * V) 
     height = U * (1 - b2 / (a * V)) 
     lat = jnp.atan((z + ep * ep *zo) / r) 
-    temp = jnp.atan(y / x) 
-    if x >=0 :    
+    temp = jnp.atan(y / x)
+    if x >= 0 :    
         long = temp 
     elif (x < 0) & (y >= 0):
         long = pi + temp 
@@ -155,100 +152,50 @@ def wrap_PI(angle):
     res -= 2 * jnp.pi * mask1
     return res
 
-def get_AO_TA_R(ego_pos, enm_pos, ego_vel, enm_vel, return_side=False):
+def get_AO_TA_R(ego_feature, enm_feature):
     """Get AO & TA angles and relative distance between two agent.
 
     Args:
-        ego_feature & enemy_feature (tuple): (north, east, altitude, vn, ve, vu)
+        ego_feature & enemy_feature (tuple): (north, east, down, vn, ve, vd)
 
     Returns:
         (tuple): ego_AO, ego_TA, R
     """
-    ego_v = torch.linalg.norm(ego_vel, dim=1)
-    enm_v = torch.linalg.norm(enm_vel, dim=1)
-    delta_pos = enm_pos - ego_pos
-    distance = torch.linalg.norm(delta_pos, dim=1)
+    ego_x, ego_y, ego_z, ego_vx, ego_vy, ego_vz = ego_feature
+    ego_velocity = jnp.hstack((ego_vx, ego_vy, ego_vz))
+    ego_v = jnp.linalg.norm(ego_velocity)
+    enm_x, enm_y, enm_z, enm_vx, enm_vy, enm_vz = enm_feature
+    enm_velocity = jnp.hstack((enm_vx, enm_vy, enm_vz))
+    enm_v = jnp.linalg.norm(enm_velocity)
+    delta_x, delta_y, delta_z = enm_x - ego_x, enm_y - ego_y, enm_z - ego_z
+    R = jnp.linalg.norm(jnp.hstack((delta_x, delta_y, delta_z)))
 
-    proj_dist = torch.sum(delta_pos * ego_vel, dim=1)
-    ego_AO = torch.arccos(torch.clamp(proj_dist / (distance * ego_v + 1e-8), -1, 1))
-    proj_dist = torch.sum(delta_pos * enm_vel, dim=1)
-    ego_TA = torch.arccos(torch.clamp(proj_dist / (distance * enm_v + 1e-8), -1, 1))
-    if not return_side:
-        return ego_AO, ego_TA, distance
-    else:
-        temp_ego_vel = torch.hstack((ego_vel[:, :-1], torch.zeros_like(ego_vel[:, -1].reshape(-1, 1))))
-        temp_delta_pos = torch.hstack((delta_pos[:, :-1], torch.zeros_like(delta_pos[:, -1].reshape(-1, 1))))
-        cross = torch.cross(temp_ego_vel, temp_delta_pos)
-        side_flag = torch.sign(cross[:, -1])
-        return ego_AO, ego_TA, distance, side_flag
+    proj_dist = delta_x * ego_vx + delta_y * ego_vy + delta_z * ego_vz
+    ego_AO = jnp.arccos(jnp.clip(proj_dist / (R * ego_v + 1e-6), -1, 1))
+    proj_dist = delta_x * enm_vx + delta_y * enm_vy + delta_z * enm_vz
+    ego_TA = jnp.arccos(jnp.clip(proj_dist / (R * enm_v + 1e-6), -1, 1))
+
+    side_flag = jnp.sign(jnp.cross(jnp.hstack((ego_vx, ego_vy)), jnp.hstack((delta_x, delta_y))))
+    return ego_AO, ego_TA, R, side_flag
 
 
-def get2d_AO_TA_R(ego_pos, enm_pos, ego_vel, enm_vel, return_side=False):
-    ego_vel = ego_vel[:, :-1]
-    enm_vel = enm_vel[:, :-1]
-    ego_pos = ego_pos[:, :-1]
-    enm_pos = enm_pos[:, :-1]
-    ego_v = torch.linalg.norm(ego_vel, dim=1)
-    enm_v = torch.linalg.norm(enm_vel, dim=1)
-    delta_pos = enm_pos - ego_pos
-    distance = torch.linalg.norm(delta_pos, dim=1)
+def get2d_AO_TA_R(ego_feature, enm_feature):
+    ego_x, ego_y, ego_z, ego_vx, ego_vy, ego_vz = ego_feature
+    ego_velocity = jnp.hstack((ego_vx, ego_vy))
+    ego_v = jnp.linalg.norm(ego_velocity)
+    enm_x, enm_y, enm_z, enm_vx, enm_vy, enm_vz = enm_feature
+    enm_velocity = jnp.hstack((enm_vx, enm_vy))
+    enm_v = jnp.linalg.norm(enm_velocity)
+    delta_x, delta_y, delta_z = enm_x - ego_x, enm_y - ego_y, enm_z - ego_z
+    R = jnp.linalg.norm(jnp.hstack((delta_x, delta_y)))
 
-    proj_dist = torch.sum(delta_pos * ego_vel, dim=1)
-    ego_AO = torch.arccos(torch.clamp(proj_dist / (distance * ego_v + 1e-8), -1, 1))
-    proj_dist = torch.sum(delta_pos * enm_vel, dim=1)
-    ego_TA = torch.arccos(torch.clamp(proj_dist / (distance * enm_v + 1e-8), -1, 1))
+    proj_dist = delta_x * ego_vx + delta_y * ego_vy
+    ego_AO = jnp.arccos(jnp.clip(proj_dist / (R * ego_v + 1e-6), -1, 1))
+    proj_dist = delta_x * enm_vx + delta_y * enm_vy
+    ego_TA = jnp.arccos(jnp.clip(proj_dist / (R * enm_v + 1e-6), -1, 1))
 
-    if not return_side:
-        return ego_AO, ego_TA, distance
-    else:
-        temp_ego_vel = torch.hstack((ego_vel, torch.zeros_like(ego_vel[:, -1].reshape(-1, 1))))
-        temp_delta_pos = torch.hstack((delta_pos, torch.zeros_like(delta_pos[:, -1].reshape(-1, 1))))
-        cross = torch.cross(temp_ego_vel, temp_delta_pos)
-        side_flag = torch.sign(cross[:, -1])
-        return ego_AO, ego_TA, distance, side_flag
-
-def orientation_reward(AO, TA, version='v2'):
-    if version == 'v0':
-        return (1 - torch.tanh(9 * (AO - torch.pi / 9))) / 3 + 1 / 3 \
-            + torch.min((torch.arctanh(1 - torch.max(2 * TA / torch.pi, 1e-4 * torch.ones_like(TA)))) / (2 * torch.pi), torch.zeros_like(TA)) + 0.5
-    elif version == 'v1':
-        return (1 - torch.tanh(2 * (AO - torch.pi / 2))) / 2 \
-            * (torch.arctanh(1 - torch.max(2 * TA / torch.pi, 1e-4 * torch.ones_like(TA)))) / (2 * torch.pi) + 0.5
-    elif version == 'v2':
-        return 1 / (50 * AO / torch.pi + 2) + 1 / 2 \
-            + torch.min((torch.arctanh(1 - torch.max(1.9 * TA / torch.pi, 1e-4 * torch.ones_like(TA)))) / (2 * torch.pi), torch.zeros_like(TA)) + 0.5
-    else:
-        raise NotImplementedError(f"Unknown orientation function version: {version}")
-
-def range_reward(target_dist, R, version='v3'):
-    if version == 'v0':
-        return torch.exp(-(R - target_dist) ** 2 * 0.004) / (1 + torch.exp(-(R - target_dist + 2) * 2))
-    elif version == 'v1':
-        return torch.clamp(1.2 * torch.min(torch.exp(-(R - target_dist) * 0.21), torch.ones_like(R)) /
-                                    (1 + torch.exp(-(R - target_dist + 1) * 0.8)), 0.3, 1)
-    elif version == 'v2':
-        return torch.max(torch.clamp(1.2 * torch.min(torch.exp(-(R - target_dist) * 0.21), torch.ones_like(R)) /
-                                        (1 + torch.exp(-(R - target_dist + 1) * 0.8)), 0.3, 1), torch.sign(7 - R))
-    elif version == 'v3':
-        return 1 * (R < 5) + (R >= 5) * torch.clamp(-0.032 * R ** 2 + 0.284 * R + 0.38, 0, 1) + torch.clamp(torch.exp(-0.16 * R), 0, 0.2)
-    else:
-        raise NotImplementedError(f"Unknown range function version: {version}")
-
-def orientation_fn(AO):
-    mask1 = AO >= 0
-    mask2 = AO <= torch.pi / 6
-    mask3 = mask1 & mask2
-    mask1 = AO <= 0
-    mask2 = AO >= -torch.pi / 6
-    mask4 = mask1 & mask2
-    result = (1 - 6 * AO / torch.pi) * mask3 + (1 + 6 * AO / torch.pi) * mask4
-    return result
-
-def distance_fn(R):
-    mask1 = R <= 1
-    mask2 = (R > 1) & (R <= 3)
-    result = 1 * mask1 + (3 - R) / 2 * mask2
-    return result
+    side_flag = jnp.sign(jnp.cross(jnp.hstack((ego_vx, ego_vy)), jnp.hstack((delta_x, delta_y))))
+    return ego_AO, ego_TA, R, side_flag
 
 def wedge_formation(num_agents, spacing):
     max_layers = num_agents  # 最大层数
