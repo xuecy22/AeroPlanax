@@ -201,9 +201,9 @@ def test(config, rng):
         log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
 
         action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
-                                    action_elevator[:, :, np.newaxis], 
-                                    action_aileron[:, :, np.newaxis], 
-                                    action_rudder[:, :, np.newaxis]], axis=-1)
+                                  action_elevator[:, :, np.newaxis], 
+                                  action_aileron[:, :, np.newaxis], 
+                                  action_rudder[:, :, np.newaxis]], axis=-1)
         
         value, action, log_prob = (
             value.squeeze(0),

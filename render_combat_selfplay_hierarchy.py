@@ -17,7 +17,7 @@ from flax.training.train_state import TrainState
 import distrax
 import optax
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
+from envs.aeroplanax_combat_hierarchy import AeroPlanaxHierarchicalCombatEnv, HierarchicalCombatTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -72,22 +72,19 @@ class ActorCriticRNN(nn.Module):
             self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
         )(embedding)
         actor_mean = activation(actor_mean)
-        actor_throttle_mean = nn.Dense(
+        actor_altitude_mean = nn.Dense(
             self.action_dim[0], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_elevator_mean = nn.Dense(
+        actor_heading_mean = nn.Dense(
             self.action_dim[1], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_aileron_mean = nn.Dense(
+        actor_vt_mean = nn.Dense(
             self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_rudder_mean = nn.Dense(
-            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
-        pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
-        pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
-        pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
+
+        pi_altitude = distrax.Categorical(logits=actor_altitude_mean)
+        pi_heading = distrax.Categorical(logits=actor_heading_mean)
+        pi_vt = distrax.Categorical(logits=actor_vt_mean)
 
         critic = nn.Dense(
             self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
@@ -97,7 +94,7 @@ class ActorCriticRNN(nn.Module):
             critic
         )
 
-        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder), jnp.squeeze(critic, axis=-1)
+        return hidden, (pi_altitude, pi_heading, pi_vt), jnp.squeeze(critic, axis=-1)
 
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -127,8 +124,8 @@ def test(config, rng):
         )
         return config["LR"] * frac
     # init env
-    env_params = CombatTaskParams()
-    env = AeroPlanaxCombatEnv(env_params)
+    env_params = HierarchicalCombatTaskParams()
+    env = AeroPlanaxHierarchicalCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config['NUM_ALLIES'] = env.num_allies
@@ -136,7 +133,7 @@ def test(config, rng):
     rng = jax.random.PRNGKey(config['SEED'])
 
     # init model
-    network = ActorCriticRNN([31, 41, 41, 41], config=config)
+    network = ActorCriticRNN([3, 5, 3], config=config)
     rng, _rng = jax.random.split(rng)
     init_x = (
         jnp.zeros(
@@ -148,7 +145,7 @@ def test(config, rng):
     network_params = network.init(_rng, init_hstate, init_x)
 
     # INIT OPPONENT NETWORK
-    enm_network = ActorCriticRNN([31, 41, 41, 41], config=config)
+    enm_network = ActorCriticRNN([3, 5, 3], config=config)
     rng, _rng = jax.random.split(rng)
     init_x = (
         jnp.zeros(
@@ -191,27 +188,24 @@ def test(config, rng):
 
     # TEST LOOP
     def _get_actions(rng, pi):
-        pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+        pi_altitude, pi_heading, pi_vt = pi
 
         rng, _rng = jax.random.split(rng)
-        action_throttle = pi_throttle.sample(seed=_rng)
+        action_altitude = pi_altitude.sample(seed=_rng)
         rng, _rng = jax.random.split(rng)
-        action_elevator = pi_elevator.sample(seed=_rng)
+        action_heading = pi_heading.sample(seed=_rng)
         rng, _rng = jax.random.split(rng)
-        action_aileron = pi_aileron.sample(seed=_rng)
-        rng, _rng = jax.random.split(rng)
-        action_rudder = pi_rudder.sample(seed=_rng)
-        log_prob_throttle = pi_throttle.log_prob(action_throttle)
-        log_prob_elevator = pi_elevator.log_prob(action_elevator)
-        log_prob_aileron = pi_aileron.log_prob(action_aileron)
-        log_prob_rudder = pi_rudder.log_prob(action_rudder)
+        action_vt = pi_vt.sample(seed=_rng)
+    
+        log_prob_altitude = pi_altitude.log_prob(action_altitude)
+        log_prob_heading = pi_heading.log_prob(action_heading)
+        log_prob_vt = pi_vt.log_prob(action_vt)
 
-        log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
+        log_prob = log_prob_altitude + log_prob_heading + log_prob_vt
 
-        action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
-                                  action_elevator[:, :, np.newaxis], 
-                                  action_aileron[:, :, np.newaxis], 
-                                  action_rudder[:, :, np.newaxis]], axis=-1)
+        action = jnp.concatenate([action_altitude[:, :, np.newaxis], 
+                                  action_heading[:, :, np.newaxis], 
+                                  action_vt[:, :, np.newaxis]], axis=-1)
         return action, log_prob
 
     def _env_step(test_state):
@@ -309,7 +303,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-16-21-31/checkpoints/checkpoint_epoch_1000" 
+    # "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-16-21-31/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

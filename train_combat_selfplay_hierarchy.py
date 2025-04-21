@@ -19,7 +19,7 @@ import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
+from envs.aeroplanax_combat_hierarchy import AeroPlanaxHierarchicalCombatEnv, HierarchicalCombatTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -74,22 +74,19 @@ class ActorCriticRNN(nn.Module):
             self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
         )(embedding)
         actor_mean = activation(actor_mean)
-        actor_throttle_mean = nn.Dense(
+        actor_altitude_mean = nn.Dense(
             self.action_dim[0], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_elevator_mean = nn.Dense(
+        actor_heading_mean = nn.Dense(
             self.action_dim[1], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_aileron_mean = nn.Dense(
+        actor_vt_mean = nn.Dense(
             self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        actor_rudder_mean = nn.Dense(
-            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
-        pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
-        pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
-        pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
+
+        pi_altitude = distrax.Categorical(logits=actor_altitude_mean)
+        pi_heading = distrax.Categorical(logits=actor_heading_mean)
+        pi_vt = distrax.Categorical(logits=actor_vt_mean)
 
         critic = nn.Dense(
             self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
@@ -99,7 +96,7 @@ class ActorCriticRNN(nn.Module):
             critic
         )
 
-        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder), jnp.squeeze(critic, axis=-1)
+        return hidden, (pi_altitude, pi_heading, pi_vt), jnp.squeeze(critic, axis=-1)
 
 
 class Transition(NamedTuple):
@@ -123,8 +120,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env_params = CombatTaskParams()
-    env = AeroPlanaxCombatEnv(env_params)
+    env_params = HierarchicalCombatTaskParams()
+    env = AeroPlanaxHierarchicalCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config['NUM_ALLIES'] = env.num_allies
@@ -136,7 +133,7 @@ def make_train(config):
         config["NUM_ALLIES"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
     if "LOADDIR" in config:
-        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        network = ActorCriticRNN([3, 5, 3], config=config)
         rng = jax.random.PRNGKey(42)
         init_x = (
             jnp.zeros(
@@ -177,7 +174,7 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
-        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        network = ActorCriticRNN([3, 5, 3], config=config)
         rng, _rng = jax.random.split(rng)
         init_x = (
             jnp.zeros(
@@ -189,7 +186,7 @@ def make_train(config):
         network_params = network.init(_rng, init_hstate, init_x)
 
         # INIT OPPONENT NETWORK
-        enm_network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        enm_network = ActorCriticRNN([3, 5, 3], config=config)
         rng, _rng = jax.random.split(rng)
         init_x = (
             jnp.zeros(
@@ -239,27 +236,24 @@ def make_train(config):
             runner_state, update_steps, enm_network_params = update_runner_state
             
             def _get_actions(rng, pi):
-                pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+                pi_altitude, pi_heading, pi_vt = pi
 
                 rng, _rng = jax.random.split(rng)
-                action_throttle = pi_throttle.sample(seed=_rng)
+                action_altitude = pi_altitude.sample(seed=_rng)
                 rng, _rng = jax.random.split(rng)
-                action_elevator = pi_elevator.sample(seed=_rng)
+                action_heading = pi_heading.sample(seed=_rng)
                 rng, _rng = jax.random.split(rng)
-                action_aileron = pi_aileron.sample(seed=_rng)
-                rng, _rng = jax.random.split(rng)
-                action_rudder = pi_rudder.sample(seed=_rng)
-                log_prob_throttle = pi_throttle.log_prob(action_throttle)
-                log_prob_elevator = pi_elevator.log_prob(action_elevator)
-                log_prob_aileron = pi_aileron.log_prob(action_aileron)
-                log_prob_rudder = pi_rudder.log_prob(action_rudder)
+                action_vt = pi_vt.sample(seed=_rng)
+            
+                log_prob_altitude = pi_altitude.log_prob(action_altitude)
+                log_prob_heading = pi_heading.log_prob(action_heading)
+                log_prob_vt = pi_vt.log_prob(action_vt)
 
-                log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
+                log_prob = log_prob_altitude + log_prob_heading + log_prob_vt
 
-                action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
-                                          action_elevator[:, :, np.newaxis], 
-                                          action_aileron[:, :, np.newaxis], 
-                                          action_rudder[:, :, np.newaxis]], axis=-1)
+                action = jnp.concatenate([action_altitude[:, :, np.newaxis], 
+                                          action_heading[:, :, np.newaxis], 
+                                          action_vt[:, :, np.newaxis]], axis=-1)
                 return action, log_prob
 
             def _env_step(runner_state, unused):
@@ -377,7 +371,6 @@ def make_train(config):
                         log_prob = pi[0].log_prob(traj_batch.action[:, :, 0])
                         log_prob += pi[1].log_prob(traj_batch.action[:, :, 1])
                         log_prob += pi[2].log_prob(traj_batch.action[:, :, 2])
-                        log_prob += pi[3].log_prob(traj_batch.action[:, :, 3])
 
                         # CALCULATE VALUE LOSS
                         value_pred_clipped = traj_batch.value + (
@@ -404,7 +397,7 @@ def make_train(config):
                         )
                         loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
                         loss_actor = loss_actor.mean()
-                        entropy = pi[0].entropy().mean() + pi[1].entropy().mean() + pi[2].entropy().mean() + pi[3].entropy().mean()
+                        entropy = pi[0].entropy().mean() + pi[1].entropy().mean() + pi[2].entropy().mean()
 
                         # debug
                         approx_kl = ((ratio - 1) - logratio).mean()
@@ -587,8 +580,8 @@ config = {
     "LR": 3e-4,
     "NUM_ENVS": 300,
     "NUM_ACTORS": 2,
-    "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 9e8,
+    "NUM_STEPS": 1000,
+    "TOTAL_TIMESTEPS": 3e8,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -617,7 +610,7 @@ wandb.init(
     config=config,
     name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
     group=config['GROUP'],
-    notes='singlecombat selfplay',
+    notes='singlecombat selfplay hierarchy',
     # dir=config['LOGDIR'],
     reinit=True,
 )
