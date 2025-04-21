@@ -198,6 +198,8 @@ def test(config, rng):
 
         log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
 
+        # - 先得到 形状 (1, N_actor, 4) 的动作张量（与 heading 相同）
+        # - 取 仅第 0 个时间步且第 0 个智能体 的动作，随后用 jnp.tile 复制 到 (N_actor, 4)
         action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
                                     action_elevator[:, :, np.newaxis], 
                                     action_aileron[:, :, np.newaxis], 
