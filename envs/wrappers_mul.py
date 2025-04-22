@@ -20,23 +20,23 @@ class JaxMARLWrapper(object):
         self._env = env
 
     def __getattr__(self, name: str):
-        return getattr(self._env, name)
+        return getattr(self._env, name) # 提供环境属性访问
 
     # def _batchify(self, x: dict):
     #     x = jnp.stack([x[a] for a in self._env.agents])
     #     return x.reshape((self._env.num_agents, -1))
 
-    def _batchify_floats(self, x: dict):
+    def _batchify_floats(self, x: dict): # 定义_batchify_floats将字典转为数组
         return jnp.stack([x[a] for a in self._env.agents])
 
 
 @struct.dataclass
-class LogEnvState:
+class LogEnvState: # 数据类
     env_state: EnvState
-    episode_returns: float
-    episode_lengths: int
-    returned_episode_returns: float
-    returned_episode_lengths: int
+    episode_returns: float # 记录累积奖励
+    episode_lengths: int # 回合长度
+    returned_episode_returns: float # 返回累积奖励
+    returned_episode_lengths: int # 返回回合长度
 
 
 class LogWrapper(JaxMARLWrapper):
@@ -49,7 +49,7 @@ class LogWrapper(JaxMARLWrapper):
         self.replace_info = replace_info
 
     @partial(jax.jit, static_argnums=(0,))
-    def reset(self, key: chex.PRNGKey) -> Tuple[chex.Array, EnvState]:
+    def reset(self, key: chex.PRNGKey) -> Tuple[chex.Array, EnvState]: # 初始化状态和统计数据
         obs, env_state = self._env.reset(key)
         state = LogEnvState(
             env_state,
@@ -82,14 +82,20 @@ class LogWrapper(JaxMARLWrapper):
         state: LogEnvState,
         action: Union[int, float],
     ) -> Tuple[chex.Array, LogEnvState, float, dict, chex.Array, dict]:
+        # 执行环境步骤
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action
         )
         alive_mask = state.env_state.plane_state.is_alive_or_locked
 
+        # 检查回合是否结束
         ep_done = done["__all__"]
+
+        # 更新累积奖励和回合长度
         new_episode_return = state.episode_returns + self._batchify_floats(reward).reshape(-1)
         new_episode_length = state.episode_lengths + 1
+
+        # 更新状态
         state = LogEnvState(
             env_state=env_state,
             episode_returns=new_episode_return * (1 - ep_done),
@@ -101,6 +107,7 @@ class LogWrapper(JaxMARLWrapper):
         )
         if self.replace_info:
             info = {}
+        # 更新info字典
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["returned_episode"] = ep_done

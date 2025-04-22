@@ -13,6 +13,11 @@ from typing import Dict, Optional, List, Tuple, Union
 from .aeroplanax import AeroPlanaxEnv, EnvState
 
 
+# 主要功能
+# 记录每个智能体的回合统计数据
+# 在回合结束时保存最终回报和长度
+# 自动重置计数器开始新回合
+
 class JaxMARLWrapper(object):
     """Base class for all jaxmarl wrappers."""
 

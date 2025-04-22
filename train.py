@@ -39,11 +39,12 @@ config = {
     "LOGDIR": "results/" + str_date_time + "/logs",
     "SAVEDIR": "results/" + str_date_time + "/checkpoints",
     "FOR_LOOP_EPOCHS": 50,
-    "WANDB": False
+    "WANDB": True,
     # "LOADDIR": "/data_ssd2/lxy/AeroPlanax/baselines/formation_2/form_3" 
     # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-01-26-04-39/checkpoints/checkpoint_epoch_1" 
 }
-config = config | MINI_CONFIG
+# config = config | MINI_CONFIG
+config = config | MEDIUM_CONFIG
 config["NUM_UPDATES"] = (
     config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
 )

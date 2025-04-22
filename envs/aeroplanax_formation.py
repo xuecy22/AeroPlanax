@@ -202,6 +202,15 @@ def formation_reward_EZ_fn(
     agent_id: AgentID,
     reward_scale: float = 1.0,
 ) -> float:
+    """
+    当距离<100米(0.1归一化)：amp_distance=0，不再增强距离奖励
+    当距离在100-250米之间：amp_distance线性增加，越远越重视
+    当距离>250米(0.25归一化)：amp_distance=1，完全重视距离奖励
+    这样设计使得：
+    飞机进入非常接近目标位置后，减少距离调整幅度，避免过度修正
+    在中等距离时，平滑过渡，强调逐渐接近
+    在远距离时，全力以赴减小距离
+    """
     target_pos = state.formation_positions[agent_id]
     
     delta_north = (target_pos[0] - state.plane_state.north[agent_id])
@@ -216,15 +225,23 @@ def formation_reward_EZ_fn(
                             1)
 
     def get_target_degree(delta_distance:float):
+        """
+        这个函数根据东西方向位置偏差计算理想航向角：
+        当偏差<100米：目标角度为0度(直线飞行)
+        当偏差在100-10000米之间：使用对数函数25.0 * jnp.log10(abs_distance) - 50.0，距离越远，转向角度越大
+        当偏差>10000米：最大转向角度为50度
+        这是飞行控制的经典方法：距离越远，转弯越大，距离越近，转弯越小，避免过冲。
+        """
         abs_distance = jnp.abs(delta_distance)
         return jnp.sign(delta_distance) * jnp.where(abs_distance < 10000.0,
                                         jnp.where(abs_distance < 100.0, 0, 25.0 * jnp.log10(abs_distance) - 50.0,),
                                         50.0
                                         )
 
-
+    # 计算理想航向角
     target_yaw = get_target_degree(delta_east) * jnp.pi / 180 + state.target_heading
 
+    # 计算航向角偏差并正规化
     delta_yaw = jnp.abs(wrap_PI(target_yaw - wrap_PI(state.plane_state.yaw[agent_id])))
     reward_yaw =  -((delta_yaw / (jnp.pi/4)))
 
@@ -234,6 +251,10 @@ def formation_reward_EZ_fn(
 
     total_reward = reward_angle * amp_angle + reward_distance * amp_distance
 
+    # 最终奖励是航向奖励和距离奖励的加权和，其中：
+    # 航向奖励权重固定为1.0
+    # 距离奖励权重根据距离动态调整
+    # 只有飞机存活或锁定时才有奖励
     mask = state.plane_state.is_alive_or_locked[agent_id]
 
     return total_reward * reward_scale * mask
@@ -358,6 +379,13 @@ class AeroPlanaxFormationEnv(MulAeroPlanaxEnv):
             state: FormationTaskState,
             params: FormationTaskParams,
         ):
+        """
+        基于formation_type选择编队形状(楔形/线形/钻石形)
+        设置团队中心和平均高度
+        确保飞机间保持安全距离
+        为每架飞机添加随机初始位置偏移
+        返回更新后的状态和目标编队位置
+        """
         if self.num_allies != self.num_agents:
             raise ValueError("num_enemy > 0 in FormationEnv")
         
@@ -379,8 +407,8 @@ class AeroPlanaxFormationEnv(MulAeroPlanaxEnv):
         # NOTE: 目标形状固定，但是初始位置有随机偏移量
         formation_positions:jax.Array
 
-        R_XY = params.max_xy_increment
-        R_Z = params.max_z_increment
+        R_XY = params.max_xy_increment # 偏移量：555
+        R_Z = params.max_z_increment # 偏移量：555
         key_x, key_y, key_z = jax.random.split(key, 3)
 
         dx = jax.random.uniform(key_x, shape=(self.num_allies,), minval=-R_XY, maxval=R_XY)

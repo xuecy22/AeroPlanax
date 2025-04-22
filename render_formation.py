@@ -44,7 +44,10 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\baselines\\form_0415_cp560" 
+    "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/envs/models/form_baselines/form_0415_cp560" 
+    # "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/envs/models/form_baselines/form_0415_cp440" 
+    # "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/envs/models/form_baselines/form_0415_cp520"
+    # "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/envs/models/form_baselines/form_0415_cp920"
     # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-02-18-17/checkpoints/checkpoint_epoch_1000" 
 }
 
