@@ -57,6 +57,13 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
         self.ego_topK = env_params.ego_topK
         self.unit_features: int= 5
         self.own_features: int= 15
+        
+        self.observation_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
+        }
+        self.action_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_action_space(i) for i, agent in enumerate(self.agents)
+        }
 
     @property
     def global_obs_size(self) -> int:
@@ -123,6 +130,23 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
     ) -> Dict[AgentName, chex.Array]:
         return self._get_top_k_other_plane_obs(state, self.ego_topK)
 
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_own_features(
+        self,
+        state: MulAgentEnvState,
+        i: int
+    ) -> chex.Array:
+        raise NotImplementedError()
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_other_features(
+        self,
+        state: MulAgentEnvState,
+        i: int,
+        j_idx: int
+    ) -> chex.Array:
+        raise NotImplementedError()
+
     @functools.partial(jax.jit, static_argnums=(0,2,))
     def _get_top_k_other_plane_obs(
         self,
@@ -164,82 +188,15 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
 
         indices = jnp.where(jnp.arange(top_k)[:self.num_agents] < self.num_agents, sorted_indices[:, :top_k], -1)
         
-        def _observe_features(state: MulAgentEnvState, i: int, j_idx: int):
-            """Get features of unit j as seen from unit i"""
-            cur_pos = jnp.hstack((state.plane_state.north[i], state.plane_state.east[i], state.plane_state.altitude[i]))
-            enemy_pos = jnp.hstack((state.plane_state.north[j_idx], state.plane_state.east[j_idx], state.plane_state.altitude[j_idx]))
-            relative_vector = cur_pos - enemy_pos
-            
-            # 计算敌机的朝向向量
-            st = jnp.sin(state.plane_state.pitch[j_idx])
-            ct = jnp.cos(state.plane_state.pitch[j_idx])
-            spsi = jnp.sin(state.plane_state.yaw[j_idx])
-            cpsi = jnp.cos(state.plane_state.yaw[j_idx])
-            heading_vector = jnp.hstack((ct * cpsi, ct * spsi, st))
-            
-            # 计算相对向量和敌机朝向向量的点积
-            dot_product = jnp.sum(relative_vector * heading_vector)
-            
-            # 计算自机和敌机之间的距离
-            distance = jnp.linalg.norm(relative_vector, axis=0)
-            norm_delta_north = (state.plane_state.north[j_idx] - state.plane_state.north[i]) / 1000
-            norm_delta_east = (state.plane_state.east[j_idx] - state.plane_state.east[i]) / 1000
-            norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) / 1000
-            norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) / 340
-            norm_AO = dot_product / (distance + 1e-6)  # 防止除以零
-            # norm_distance = distance / 5000
-
-            empty_features = jnp.zeros(shape=(self.unit_features,))
-            # TODO:20000写在外面
-            return jax.lax.cond(
-                distance < 20000,
-                lambda: jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, norm_delta_vt, 
-                                    norm_AO,
-                                    # norm_distance
-                                    )),
-                lambda: empty_features
-            )
-        
         def get_features(i:int, j:int) -> chex.Array:
             empty_features = jnp.zeros(shape=(self.unit_features,))
             visible = i!=j
             return jax.lax.cond(
                 j >= 0 & visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j],
-                lambda: _observe_features(state, i, j),
+                lambda: self._get_other_features(state, i, j),
                 lambda: empty_features
             )
         
-        def _get_own_features(state: MulAgentEnvState, i: int) -> chex.Array:
-            altitude = state.plane_state.altitude[i]
-            roll, pitch, yaw = state.plane_state.roll[i], state.plane_state.pitch[i], state.plane_state.yaw[i]
-            vt = state.plane_state.vt[i]
-            
-            norm_altitude = altitude / 1000
-            norm_vt = vt / 340
-
-            roll = wrap_PI(roll - state.target_heading)
-            pitch = wrap_PI(pitch - state.target_heading)
-            yaw = wrap_PI(yaw - state.target_heading)
-            
-            alpha, beta = wrap_PI(state.plane_state.alpha[i]), wrap_PI(state.plane_state.beta[i])
-
-            
-            P, Q, R = state.plane_state.P[i], state.plane_state.Q[i], state.plane_state.R[i]
-
-            norm_delta_north = (state.plane_state.north[i] - state.formation_positions[i, 0]) / 1000
-            norm_delta_east = (state.plane_state.east[i] - state.formation_positions[i, 1]) / 1000
-            norm_delta_altitude = (altitude - state.formation_positions[i, 2]) / 1000
-            norm_delta_vt = (vt - state.target_vt) / 340
-            
-            empty_features = jnp.zeros(shape=(self.own_features,))
-            features = jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, roll, pitch, yaw, norm_delta_vt,
-                                    norm_altitude, norm_vt, state.plane_state.overload[i],
-                                    alpha, beta,
-                                    P, Q, R))
-
-            return jax.lax.cond(
-                state.plane_state.is_alive[i], lambda: features, lambda: empty_features
-            )
         
         get_all_features_for_unit_inner = jax.vmap(get_features, in_axes=(None, 0))
         get_all_features_for_unit = jax.vmap(get_all_features_for_unit_inner, in_axes=(0, 0))
@@ -247,7 +204,7 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
             jnp.arange(self.num_agents), indices
         ).reshape((self.num_agents, -1))
 
-        get_all_self_features = jax.vmap(_get_own_features, in_axes=(None, 0))
+        get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
         own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
         
         obs = jnp.concatenate([own_unit_obs, other_unit_obs], axis=-1)

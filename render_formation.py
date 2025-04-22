@@ -4,6 +4,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 import jax
+from jax.typing import ArrayLike
 import jax.numpy as jnp
 import numpy as np
 from typing import Sequence, NamedTuple, Any, Dict
@@ -24,11 +25,11 @@ class Transition(NamedTuple):
     obs: jnp.ndarray
     info: jnp.ndarray
 
-env_params = FormationTaskParams()
+env_params = FormationTaskParams(num_allies=25,max_communicate_distance=50000.0)
 env = AeroPlanaxFormationEnv(env_params)
 
 config = {
-    "SEED": 42,
+    "SEED": 114,
     "LR": 3e-4,
     "NUM_ENVS": 1,
     "NUM_ACTORS": env.num_agents,
@@ -44,8 +45,8 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\baselines\\form_0415_cp560" 
-    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-03-02-18-17/checkpoints/checkpoint_epoch_1000" 
+    # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp920" 
+    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0420_cp960" 
 }
 
 env = LogWrapper(env)
@@ -53,13 +54,14 @@ env = LogWrapper(env)
 
 network_params = ac_train_state.params
 
-def test(config):
+def test(config, enable_render=True):
     rng = jax.random.PRNGKey(config['SEED'])
     # INIT ENV
     rng, _rng = jax.random.split(rng)
     reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
     obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
-    env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
+    if enable_render:
+        env.render(env_state.env_state, env_params, {'__all__': False}, './tracks/')
     init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
     # TEST LOOP
@@ -67,6 +69,10 @@ def test(config):
     def _env_step(test_state):
         env_state, last_obs, last_done, hstate, rng = test_state
         rng, _rng = jax.random.split(rng)
+
+        # last_obs : ArrayLike
+        # last_obs = last_obs.at[:,10].set(0.)
+        # last_obs = last_obs.at[:,11].set(0.)
         ac_in = (
             last_obs[np.newaxis, :],
             last_done[np.newaxis, :],
@@ -87,7 +93,8 @@ def test(config):
             env.step, in_axes=(0, 0, 0)
         )(rng_step, env_state, 
             unbatchify(action, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]))
-        env.render(env_state.env_state, env_params, done, './tracks/')
+        if enable_render:
+            env.render(env_state.env_state, env_params, done, './tracks/')
         reward = batchify(reward, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
         transition = Transition(
             last_done, action, reward, log_prob, last_obs, info
@@ -109,7 +116,7 @@ def test(config):
         init_hstate,
         _rng,
     )
-    while True:
+    for _ in range(5000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
         assert isinstance(env_state, FormationTaskState)
@@ -122,7 +129,11 @@ def test(config):
 
         distance = (delta_N**2+delta_E**2+delta_alt**2)**(1/2)
 
-        print(f't: {env_state.time}, distance: {distance}, alive: {env_state.plane_state.is_crashed}, Done: {env_state.done}, Reward: {traj_batch.reward}')
+        # print(f'{env_state.time} alpha:{env_state.plane_state.alpha[0]}')
+        # print(f't: {env_state.time}, alive: {env_state.plane_state.is_crashed}, Done: {env_state.done}, Reward: {traj_batch.reward}')
+        # print(f't: {env_state.time}, dist: {distance}, alive: {env_state.plane_state.is_crashed}, Done: {env_state.done}, Reward: {traj_batch.reward}')
+        print(f'{env_state.time}, dist: {distance[0]}, crashed: {['T' if x else 'F' for x in env_state.plane_state.is_crashed[0]]}')
+        # print(f'{env_state.time}, dist: {distance[0]}, crashed: {['T' if x else 'F' for x in env_state.plane_state.is_crashed[0]]} pos: {env_state.plane_state.north[0]},{env_state.plane_state.east[0]}')
 
         
     return {"test_state": test_state, "trajectory": traj_batch}

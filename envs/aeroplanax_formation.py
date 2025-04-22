@@ -67,7 +67,7 @@ class FormationTaskParams(MulAgentEnvParams):
     max_z_increment: float = 555
     
     safe_distance: float = 2000
-    max_communicate_distance: float = 20000.0
+    max_communicate_distance: float = 0.0
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
     global_topK: int = 1
@@ -285,7 +285,7 @@ class AeroPlanaxFormationEnv(MulAeroPlanaxEnv):
 
         self.termination_conditions = [
             crashed_fn,
-            functools.partial(unreach_formation_fn, min_check_interval=20, max_check_interval=100, valid_distance=50),
+            functools.partial(unreach_formation_fn, min_check_interval=20, max_check_interval=100, valid_distance=200),
         ]
     
     @property
@@ -328,28 +328,141 @@ class AeroPlanaxFormationEnv(MulAeroPlanaxEnv):
 
         key, key_target_vt = jax.random.split(key)
         target_vt = jax.random.uniform(key_target_vt, minval=params.min_vt, maxval=params.max_vt)
-        # target_heading = wrap_PI(0.0)
+        target_heading = wrap_PI(0)
+        init_heading = jnp.full((self.num_agents,),0.)
         
         state = state.replace(
             plane_state=state.plane_state.replace(
                 vel_x=vel_x,
                 vt=vt,
+                # yaw=init_heading
             ),
             formation_positions=formation_positions,
-            # target_heading=target_heading,
+            target_heading=target_heading,
             target_vt=target_vt,
             last_is_crashed=state.plane_state.is_crashed
         )
         return state
 
     @functools.partial(jax.jit, static_argnums=(0,))
-    def _step_task(self, key, state: FormationTaskState, action, params):
+    def _step_task(
+        self,
+        key,
+        state: FormationTaskState,
+        info: Dict[str, Any],
+        action,
+        params
+    ) -> Tuple[FormationTaskState, Dict[str, Any]]:
         delta_time = 1.0 / params.sim_freq * params.agent_interaction_steps
         delta_distance = state.target_vt * delta_time
+
+        new_form_position = state.formation_positions.at[:, 0].add(delta_distance * jnp.cos(state.target_heading))
+        new_form_position = new_form_position.at[:, 1].add(delta_distance * jnp.sin(state.target_heading))
+
         state = state.replace(
-            formation_positions=state.formation_positions.at[:, 0].set(state.formation_positions[:, 0] + delta_distance)
+            formation_positions=new_form_position
         )
-        return state
+        
+        return state, info
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_own_features(
+        self,
+        state: FormationTaskState,
+        i: int
+    ) -> chex.Array:
+        altitude = state.plane_state.altitude[i]
+        roll, pitch, yaw = state.plane_state.roll[i], state.plane_state.pitch[i], state.plane_state.yaw[i]
+        vt = state.plane_state.vt[i]
+        
+        norm_altitude = altitude / 1000
+        norm_vt = vt / 340
+
+        roll = wrap_PI(roll)
+        pitch = wrap_PI(pitch)
+        yaw = wrap_PI(yaw - state.target_heading)
+        
+        alpha, beta = wrap_PI(state.plane_state.alpha[i]), wrap_PI(state.plane_state.beta[i])
+
+        
+        P, Q, R = state.plane_state.P[i], state.plane_state.Q[i], state.plane_state.R[i]
+
+        norm_delta_north = (state.plane_state.north[i] - state.formation_positions[i, 0]) / 1000
+        norm_delta_east = (state.plane_state.east[i] - state.formation_positions[i, 1]) / 1000
+
+        cos_target_heading = jnp.cos(state.target_heading)
+        sin_target_heading = jnp.sin(state.target_heading)
+
+        norm_delta_north = -norm_delta_east * sin_target_heading + norm_delta_north * cos_target_heading
+        norm_delta_east = norm_delta_east * cos_target_heading + norm_delta_north * sin_target_heading
+
+
+        norm_delta_altitude = (altitude - state.formation_positions[i, 2]) / 1000
+
+        norm_delta_north = jnp.clip(norm_delta_north,-0.6,0.6)
+        norm_delta_east = jnp.clip(norm_delta_east,-0.6,0.6)
+        norm_delta_altitude = jnp.clip(norm_delta_altitude,-0.6,0.6)
+        # norm_altitude = jnp.clip(norm_altitude,5.2,6.6)
+
+        ax, ay, az = state.plane_state.ax[i], state.plane_state.ay[i], state.plane_state.az[i]
+        overload = jnp.sqrt(ax**2+ay**2+az**2)
+
+        norm_delta_vt = (vt - state.target_vt) / 340
+        
+        empty_features = jnp.zeros(shape=(self.own_features,))
+        features = jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, roll, pitch, yaw, norm_delta_vt,
+                                norm_altitude, norm_vt, overload,
+                                alpha, beta,
+                                P, Q, R))
+
+        return jax.lax.cond(
+            state.plane_state.is_alive[i], lambda: features, lambda: empty_features
+        )
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_other_features(
+        self,
+        state: MulAgentEnvState,
+        i: int,
+        j_idx: int
+    ) -> chex.Array:
+        """Get features of unit j as seen from unit i"""
+        cur_pos = jnp.hstack((state.plane_state.north[i], state.plane_state.east[i], state.plane_state.altitude[i]))
+        enemy_pos = jnp.hstack((state.plane_state.north[j_idx], state.plane_state.east[j_idx], state.plane_state.altitude[j_idx]))
+        relative_vector = cur_pos - enemy_pos
+        
+        # 计算敌机的朝向向量
+        st = jnp.sin(state.plane_state.pitch[j_idx])
+        ct = jnp.cos(state.plane_state.pitch[j_idx])
+        spsi = jnp.sin(state.plane_state.yaw[j_idx])
+        cpsi = jnp.cos(state.plane_state.yaw[j_idx])
+        heading_vector = jnp.hstack((ct * cpsi, ct * spsi, st))
+        
+        # 计算相对向量和敌机朝向向量的点积
+        dot_product = jnp.sum(relative_vector * heading_vector)
+        
+        # 计算自机和敌机之间的距离
+        distance = jnp.linalg.norm(relative_vector, axis=0)
+        norm_delta_north = (state.plane_state.north[j_idx] - state.plane_state.north[i]) / 1000
+        norm_delta_east = (state.plane_state.east[j_idx] - state.plane_state.east[i]) / 1000
+        norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) / 1000
+        norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) / 340
+        norm_AO = dot_product / (distance + 1e-6)  # 防止除以零
+        # norm_distance = distance / 5000
+
+        norm_delta_north = jnp.clip(norm_delta_north, -0.6, 0.6)
+        norm_delta_east = jnp.clip(norm_delta_east, -0.6, 0.6)
+        norm_delta_altitude = jnp.clip(norm_delta_altitude, -0.6, 0.6)
+        
+        empty_features = jnp.zeros(shape=(self.unit_features,))
+        return jax.lax.cond(
+            distance < self.max_communicate_distance,
+            lambda: jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, norm_delta_vt, 
+                                norm_AO,
+                                # norm_distance
+                                )),
+            lambda: empty_features
+        )
     
     @functools.partial(jax.jit, static_argnums=(0, ))
     def _generate_formation(
