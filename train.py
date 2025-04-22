@@ -32,16 +32,15 @@ env = Env(env_params)
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "SEED": 114,
+    "SEED": 42,
     "NUM_ACTORS": env.num_agents,
     "GROUP": "formation",
     "OUTPUTDIR": "results/" + str_date_time,
     "LOGDIR": "results/" + str_date_time + "/logs",
     "SAVEDIR": "results/" + str_date_time + "/checkpoints",
     "FOR_LOOP_EPOCHS": 50,
-    "WANDB": True,
-    # "LOADDIR": "/data_ssd2/lxy/AeroPlanax/baselines/formation_2/form_3" 
-    # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-01-26-04-39/checkpoints/checkpoint_epoch_1" 
+    "WANDB": False,
+    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
 }
 # config = config | MINI_CONFIG
 config = config | MEDIUM_CONFIG
@@ -69,8 +68,10 @@ rng = jax.random.PRNGKey(config["SEED"])
 env = LogWrapper(env)
 (actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(env, config)
 
-train_jit = jax.jit(make_train(config, env, (actor_network, critic_network)))
+train_jit = jax.jit(make_train(config, env, (actor_network, critic_network),train_mode=True))
 
+# TODO: save in make_train()
+# dont use for loop
 for i in range(config["FOR_LOOP_EPOCHS"]):
     out = train_jit(rng, (ac_train_state, cr_train_state), start_epoch)
     # out : Dict
@@ -88,7 +89,7 @@ for i in range(config["FOR_LOOP_EPOCHS"]):
     rng = runner_state[5]
     start_epoch = jnp.array(out['runner_state'][1])
     
-    config["SAVEDIR"] = save_train(out, config["SAVEDIR"])
+    save_train(out, config["SAVEDIR"])
 
 if config["WANDB"]:
     wandb.finish()

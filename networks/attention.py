@@ -37,6 +37,24 @@ class AttentionCritic(nn.Module):
 
         return value
 
+class DronePairEncoder(nn.Module):
+    embed_dim: int = 32
+
+    @nn.compact
+    def __call__(self, pair_obs):
+        """
+        pair_obs: [B, N, 6]  => 最后一维顺序固定为:
+        [speed_diff, height_diff, distance, AO, TA, side_flag]
+        """
+        side_flag = pair_obs[..., -1].astype(jnp.int32)  # [B, N]
+        continuous = pair_obs[..., :-1]                  # [B, N, 5]
+
+        embed = nn.Embed(num_embeddings=3, features=8)(side_flag)  # [B, N, 8]
+        dense_encoded = nn.Dense(self.embed_dim)(continuous)      # [B, N, embed_dim]
+
+        # 拼接编码后的离散和连续特征
+        return jnp.concatenate([dense_encoded, embed], axis=-1)   # [B, N, embed_dim + 8]
+
 import jax
 import jax.numpy as jnp
 

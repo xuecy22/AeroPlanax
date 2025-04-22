@@ -1,29 +1,354 @@
 '''
-NOTE: global_obs = obs
+适配以老式方式进行训练，应当可以直接复制进dev-heading分支并运行
+***UNCHECKED***
 '''
 import os
-import jax
-import numpy as np
-import tensorboardX
-import flax.linen as nn
-import jax.experimental
-import jax.numpy as jnp
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+# os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
+import jax
+import chex
+import wandb
+import optax
+import functools
+import distrax
+import numpy as np
+import jax.numpy as jnp
+import flax.linen as nn
 import orbax.checkpoint as ocp
-from typing import Dict, Any, Tuple
-from typing import NamedTuple
-from envs.wrappers_mul import LogWrapper
+from typing import Sequence, Dict, Tuple, List, Any, NamedTuple, Union
+from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
-from networks import (
-    ScannedRNN,
-    unzip_discrete_action,
+from pathlib import Path
+from datetime import datetime
+import tensorboardX
+import jax.experimental
+
+from envs.wrappers import JaxMARLWrapper, LogEnvState
+from envs.aeroplanax import AeroPlanaxEnv, EnvState
+from envs.aeroplanax_formation_old import (
+    AeroPlanaxFormationEnv as Env,
+    FormationTaskParams as TaskParams
+)
+# NOTE:第一维（推力）的维度需要与env中的decode方式对应
+MAPPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
+env_params = TaskParams()
+env = Env(env_params)
+
+str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
+config = {
+    "LR": 3e-4,
+    "FC_DIM_SIZE": 128,
+    "GRU_HIDDEN_DIM": 128,
+    "UPDATE_EPOCHS": 16,
+    "NUM_MINIBATCHES": 5,
+    "GAMMA": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 1e-3,
+    "VF_COEF": 1,
+    "MAX_GRAD_NORM": 2,
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": False,
+    "DEBUG": True,
+    "NUM_ACTORS": env.num_agents,
+    "OUTPUTDIR": "results/" + str_date_time,
+    "LOGDIR": "results/" + str_date_time + "/logs",
+    "SAVEDIR": "results/" + str_date_time + "/checkpoints",
+    "GROUP": "formation",
+
+    # optional
+    "USE_FOR_LOOP": False,
+    "FOR_LOOP_EPOCHS": 50,
+    "NUM_ENVS": 5,
+    "NUM_STEPS": 100,
+    # 当不使用FOR LOOP时，当前时间步%SAVE_TIMESTEPS==0就保存
+    'SAVE_TIMESTEPS': 1e3,
+    "TOTAL_TIMESTEPS": 2e3,
+    "SAVE_EPOCHS":1,
+    "NUM_UPDATES":1,
+    "SEED": 42,
+    "WANDB": False,
+    "TRAIN_MODE": True,
+    # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
+}
+
+assert(isinstance(config['TRAIN_MODE'], bool))
+
+config["NUM_UPDATES"] = (
+    config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
+)
+config["SAVE_EPOCHS"]=  max(1,
+    config["SAVE_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
 )
 
-from maketrains.utils import (
-    batchify,
-    unbatchify
-)
+if not config['USE_FOR_LOOP']:
+    config['FOR_LOOP_EPOCHS'] = 1
+
+print(f'Train = {config['TRAIN_MODE']} | {config['FOR_LOOP_EPOCHS']} * {config["NUM_UPDATES"]} epochs. ')
+if config['TRAIN_MODE']:
+    print(f'save params for every {config["NUM_UPDATES"] if config['USE_FOR_LOOP'] else config["SAVE_EPOCHS"]} epochs')
+
+class LogWrapper(JaxMARLWrapper):
+    """Log the episode returns and lengths.
+    NOTE for now for envs where agents terminate at the same time.
+    """
+
+    def __init__(self, env: AeroPlanaxEnv, replace_info: bool = False):
+        super().__init__(env)
+        self.replace_info = replace_info
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def reset(self, key: chex.PRNGKey) -> Tuple[chex.Array, EnvState]:
+        obs, env_state = self._env.reset(key)
+        state = LogEnvState(
+            env_state,
+            jnp.zeros((self._env.num_agents,)),
+            jnp.zeros((self._env.num_agents,)),
+            jnp.zeros((self._env.num_agents,)),
+            jnp.zeros((self._env.num_agents,)),
+        )
+        return obs, state
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def step(
+        self,
+        key: chex.PRNGKey,
+        state: LogEnvState,
+        action: Union[int, float],
+    ) -> Tuple[chex.Array, LogEnvState, float, bool, dict]:
+        obs, env_state, reward, done, info = self._env.step(
+            key, state.env_state, action
+        )
+        ep_done = done["__all__"]
+        new_episode_return = state.episode_returns + self._batchify_floats(reward).reshape(-1)
+        new_episode_length = state.episode_lengths + 1
+        state = LogEnvState(
+            env_state=env_state,
+            episode_returns=new_episode_return * (1 - ep_done),
+            episode_lengths=new_episode_length * (1 - ep_done),
+            returned_episode_returns=state.returned_episode_returns * (1 - ep_done)
+            + new_episode_return * ep_done,
+            returned_episode_lengths=state.returned_episode_lengths * (1 - ep_done)
+            + new_episode_length * ep_done,
+        )
+        if self.replace_info:
+            info = {}
+        info["returned_episode_returns"] = state.returned_episode_returns
+        info["returned_episode_lengths"] = state.returned_episode_lengths
+        info["returned_episode"] = ep_done
+        info["success"] = info["success"]
+        return obs, state, reward, done, info
+    
+class ScannedRNN(nn.Module):
+    @functools.partial(
+        nn.scan,
+        variable_broadcast="params",
+        in_axes=0,
+        out_axes=0,
+        split_rngs={"params": False},
+    )
+    @nn.compact
+    def __call__(self, carry, x):
+        """Applies the module."""
+        rnn_state = carry
+        ins, resets = x
+        rnn_state = jnp.where(
+            resets[:, np.newaxis],
+            self.initialize_carry(*rnn_state.shape),
+            rnn_state,
+        )
+        new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
+        return new_rnn_state, y
+
+    @staticmethod
+    def initialize_carry(batch_size, hidden_size):
+        # Use a dummy key since the default state init fn is just zeros.
+        cell = nn.GRUCell(features=hidden_size)
+        return cell.initialize_carry(jax.random.PRNGKey(0), (batch_size, hidden_size))
+
+class ActorRNN(nn.Module):
+    action_dim: Sequence[int]
+    config: Dict
+
+    @nn.compact
+    def __call__(self, hidden, x):
+        obs, dones = x
+        if self.config["ACTIVATION"] == "relu":
+            activation = nn.relu
+        else:
+            activation = nn.tanh
+        embedding = nn.Dense(
+            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(obs)
+        embedding = activation(embedding)
+
+        rnn_in = (embedding, dones)
+        hidden, embedding = ScannedRNN()(hidden, rnn_in)
+
+
+        actor_mean = nn.Dense(
+            self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
+        )(embedding)
+        actor_mean = activation(actor_mean)
+        actor_throttle_mean = nn.Dense(
+            self.action_dim[0], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_elevator_mean = nn.Dense(
+            self.action_dim[1], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_aileron_mean = nn.Dense(
+            self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_rudder_mean = nn.Dense(
+            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
+        pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
+        pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
+        pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
+
+        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder)
+    
+class CriticRNN(nn.Module):
+    config: Dict
+    
+    @nn.compact
+    def __call__(self, hidden, x):
+        world_state, dones = x
+        if self.config["ACTIVATION"] == "relu":
+            activation = nn.relu
+        else:
+            activation = nn.tanh
+        embedding = nn.Dense(
+            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(world_state)
+        embedding = activation(embedding)
+        
+        rnn_in = (embedding, dones)
+        hidden, embedding = ScannedRNN()(hidden, rnn_in)
+        
+        critic = nn.Dense(
+            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
+        )(embedding)
+        critic = activation(critic)
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
+            critic
+        )
+
+        return hidden, jnp.squeeze(critic, axis=-1)
+    
+def init_network(env : LogWrapper, config : Dict[str, Any]):
+    rng = jax.random.PRNGKey(42)
+
+    def linear_schedule(count):
+        frac = (
+            1.0
+            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+            / config["NUM_UPDATES"]
+        )
+        return config["LR"] * frac
+
+    actor_network = ActorRNN(MAPPO_DISCRETE_DEFAULT_DIMS, config=config)
+    critic_network = CriticRNN(config=config)
+    rng, _rng_actor, _rng_critic = jax.random.split(rng, 3)
+
+    # NOTE: old ego_obs_size == *env.observation_space(env.agents[0]).shape)
+    # for hierarchy learning
+    ac_init_x = (
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env._get_obs_size())),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
+    )
+    ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    actor_network_params = actor_network.init(_rng_actor, ac_init_hstate, ac_init_x)
+    cr_init_x = (
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env._get_global_obs_size())),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
+    )
+    cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+    critic_network_params = critic_network.init(_rng_critic, cr_init_hstate, cr_init_x)
+    
+    if config["ANNEAL_LR"]:
+        tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(learning_rate=linear_schedule, eps=1e-5),
+        )
+    else:
+        tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(config["LR"], eps=1e-5),
+        )
+    ac_train_state = TrainState.create(
+        apply_fn=actor_network.apply,
+        params=actor_network_params,
+        tx=tx,
+    )
+    cr_train_state = TrainState.create(
+        apply_fn=critic_network.apply,
+        params=critic_network_params,
+        tx=tx,
+    )
+
+    if "LOADDIR" in config:
+        state = {
+            "actor_params": ac_train_state.params,
+            "actor_opt_state": ac_train_state.opt_state,
+            "critic_params": cr_train_state.params,
+            "critic_opt_state": cr_train_state.opt_state,
+            "epoch": jnp.array(0)
+        }
+        checkpoint = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler()).restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
+
+        actor_params, actor_opt_state = checkpoint["actor_params"], checkpoint["actor_opt_state"]
+        ac_train_state = ac_train_state.replace(params=actor_params, opt_state=actor_opt_state)
+
+        critic_params, critic_opt_state = checkpoint["critic_params"], checkpoint["critic_opt_state"]
+        cr_train_state = cr_train_state.replace(params=critic_params, opt_state=critic_opt_state)
+        
+        start_epoch = checkpoint["epoch"]
+    else:
+        start_epoch = 0
+
+    return (actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch
+
+def batchify(x: Dict[str, Any], agent_list: List[str], num_envs: int, num_actors: int):
+    '''
+    x: { agent_1:data, agent_2:data, ..., agent_n:data, __all__(or else/more):data, ...}
+    '''
+    x = jnp.stack([x[a] for a in agent_list])
+    # print('batchify', x.shape)
+    return x.reshape((num_actors * num_envs, -1))
+
+def unbatchify(x: jnp.ndarray, agent_list: List[str], num_envs: int, num_actors: int):
+    x = x.reshape((num_actors, num_envs, -1))
+    return {a: x[i] for i, a in enumerate(agent_list)}
+
+def unzip_discrete_action(rng: chex.PRNGKey, pi: Sequence[distrax.Categorical]) -> Tuple[chex.PRNGKey, jax.Array, jax.Array]:
+    pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+
+    rng, throttle_rng, elevator_rng, aileron_rng, rudder_rng = jax.random.split(rng, 5)
+
+    action_throttle = pi_throttle.sample(seed=throttle_rng)
+    action_elevator = pi_elevator.sample(seed=elevator_rng)
+    action_aileron = pi_aileron.sample(seed=aileron_rng)
+    action_rudder = pi_rudder.sample(seed=rudder_rng)
+
+    log_prob_throttle = pi_throttle.log_prob(action_throttle)
+    log_prob_elevator = pi_elevator.log_prob(action_elevator)
+    log_prob_aileron = pi_aileron.log_prob(action_aileron)
+    log_prob_rudder = pi_rudder.log_prob(action_rudder)
+
+    log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
+
+    action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
+                                action_elevator[:, :, np.newaxis], 
+                                action_aileron[:, :, np.newaxis], 
+                                action_rudder[:, :, np.newaxis]], axis=-1)
+    
+    return rng, action, log_prob
+
 
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -36,10 +361,14 @@ class Transition(NamedTuple):
     valid_action: jnp.ndarray # last_done(此时的Transition.done)和curr_done都为True时，才为False
     info: jnp.ndarray
     
-def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], train_mode: bool=True, save_epochs: int=1):
-    '''
-    save_epoch: 当目前epoch%save_epoch时保存
-    '''
+def make_train(
+    config,
+    env : LogWrapper,
+    networks : Tuple[nn.Module,nn.Module], 
+    train_mode: bool=True, 
+    save_epochs: int=1,
+    use_for_loop: bool=False, # 为True时，将不在内部保存
+):
     (actor_network, critic_network) = networks
 
     def train(rng, train_states : Tuple[TrainState,TrainState], start_epoch : int = 0):
@@ -302,11 +631,11 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                 rng = update_state[-1]
                 
                 runner_state = (train_states, env_state, last_obs, last_done, hstates, rng)
-
                 # NOTE: SAVE NETWORK
                 def save_model_callback(params:Tuple[Tuple[TrainState, TrainState], int]):
                     (actor_train_state, critic_train_state), current_epochs = params
-                    if (current_epochs + 1) % save_epochs == 0:
+                    current_epochs = current_epochs + 1
+                    if current_epochs % save_epochs == 0:                    
                         ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
                         checkpoint = {
                             "actor_params": actor_train_state.params,
@@ -319,11 +648,11 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                         ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
                         ckptr.wait_until_finished()
                         print(f"Checkpoint saved at epoch {current_epochs}")
-                    
-                jax.experimental.io_callback(save_model_callback, 
-                                            None, 
-                                            (train_states, update_steps), 
-                                            ordered=True)
+                if not use_for_loop:
+                    jax.experimental.io_callback(save_model_callback, 
+                                                None, 
+                                                (train_states, update_steps), 
+                                                ordered=True)
 
             
             metric["update_steps"] = update_steps
@@ -331,7 +660,8 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
 
             if config.get("DEBUG"):
                 def callback(metric):
-                    env_steps = metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"]
+                    # NOTE:用epoch而不是实际step，规避int溢出
+                    env_steps = metric["update_steps"]
                     if train_mode:
                         for k, v in metric["loss"].items():
                             writer.add_scalar('loss/{}'.format(k), v, env_steps)
@@ -339,7 +669,7 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
                     print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f} AliveCount={:.3f}".format(
-                        metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"],
+                        metric["update_steps"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
                         metric["success"][metric["returned_episode"]].mean(),
@@ -347,8 +677,8 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                     ))
                 jax.experimental.io_callback(callback, None, metric)
 
-            return (runner_state, update_steps), None
             # return (runner_state, update_steps), metric
+            return (runner_state, update_steps), None
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -368,3 +698,65 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
 
     return train
 
+def save_train(out: Dict[str, Any], save_dir: str):
+    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+    checkpoint = {
+        "actor_params": out['runner_state'][0][0][0].params,
+        "actor_opt_state": out['runner_state'][0][0][0].opt_state,
+        "critic_params": out['runner_state'][0][0][1].params,
+        "critic_opt_state": out['runner_state'][0][0][1].opt_state,
+        "epoch": jnp.array(out['runner_state'][1])
+    }
+    checkpoint_path = os.path.abspath(os.path.join(save_dir, f"checkpoint_epoch_{out['runner_state'][1]}"))
+    ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
+    ckptr.wait_until_finished()
+
+    print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
+    return checkpoint_path
+
+if config["WANDB"]:
+    wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
+    wandb.init(
+        project="AeroPlanax",
+        config=config,
+        name=f'seed_{config["SEED"]}',
+        group=config['GROUP'],
+        notes='form',
+        reinit=True,
+    )
+
+Path(config["SAVEDIR"]).mkdir(parents=True, exist_ok=True)
+
+rng = jax.random.PRNGKey(config["SEED"])
+
+# INIT NETWORK
+env = LogWrapper(env)
+(actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(env, config)
+
+train_jit = jax.jit(make_train(
+    config,
+    env,
+    (actor_network, critic_network),
+    train_mode=config['TRAIN_MODE'],
+    save_epochs=config['SAVE_EPOCHS'],
+    use_for_loop=config["USE_FOR_LOOP"]
+    )
+)
+
+
+for i in range(config["FOR_LOOP_EPOCHS"]):
+    out = train_jit(rng, (ac_train_state, cr_train_state), start_epoch)
+
+    runner_state = out['runner_state'][0]
+
+    (ac_train_state, cr_train_state) = runner_state[0]
+    rng = runner_state[5]
+    start_epoch = jnp.array(out['runner_state'][1])
+
+    try:
+        save_train(out, config["SAVEDIR"])
+    except:
+        print('the final epoch % save epoch == 0')
+
+if config["WANDB"]:
+    wandb.finish()

@@ -77,13 +77,13 @@ def init_network(env : LogWrapper, config : Dict[str, Any]):
     # NOTE: old ego_obs_size == *env.observation_space(env.agents[0]).shape)
     # for hierarchy learning
     ac_init_x = (
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env.ego_obs_size)),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env._get_obs_size())),
         jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
     )
     ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
     actor_network_params = actor_network.init(_rng_actor, ac_init_hstate, ac_init_x)
     cr_init_x = (
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env.global_obs_size)),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env._get_global_obs_size())),
         jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
     )
     cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])

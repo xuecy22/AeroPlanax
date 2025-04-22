@@ -58,8 +58,15 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
         self.max_communicate_distance = env_params.max_communicate_distance
         self.global_topK = env_params.global_topK
         self.ego_topK = env_params.ego_topK
-        self.unit_features: int= 5 # 观测到的其他agent的特征数量(delta_norm_north(相对北向位置(km)), delta_norm_east(相对东向位置(km)), delta_norm_altitude(相对高度(km)), delta_norm_vt(相对速度(m/s)), delta_norm_roll(相对滚转角(rad)))
-        self.own_features: int= 15 # 自身特征数量(norm_delta_north(相对北向位置(km)), norm_delta_east(相对东向位置(km)), norm_delta_altitude(相对高度(km)), norm_delta_vt(相对速度(m/s)), norm_AO(飞机->他机和他机飞行方向的cos值), norm_altitude(相对高度(km)), norm_vt(相对速度(m/s)), overload(过载), alpha(攻角(rad)), beta(侧滑角(rad)), P(滚转角速度(rad/s)), Q(俯仰角速度(rad/s)), R(偏航角速度(rad/s)))
+        self.unit_features: int= 5
+        self.own_features: int= 15
+        
+        self.observation_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
+        }
+        self.action_spaces: Dict[AgentName, spaces.Space] = {
+            agent: self._get_individual_action_space(i) for i, agent in enumerate(self.agents)
+        }
 
     @property
     def global_obs_size(self) -> int: # 全局观测中，每个agent观测到的其他agent数量
@@ -125,6 +132,23 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
         params: MulAgentEnvParams,  # 环境参数
     ) -> Dict[AgentName, chex.Array]:
         return self._get_top_k_other_plane_obs(state, self.ego_topK)
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_own_features(
+        self,
+        state: MulAgentEnvState,
+        i: int
+    ) -> chex.Array:
+        raise NotImplementedError()
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_other_features(
+        self,
+        state: MulAgentEnvState,
+        i: int,
+        j_idx: int
+    ) -> chex.Array:
+        raise NotImplementedError()
 
     @functools.partial(jax.jit, static_argnums=(0,2,))
     def _get_top_k_other_plane_obs(
@@ -205,82 +229,15 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
         否则返回第二个值-1
         """
         
-        def _observe_features(state: MulAgentEnvState, i: int, j_idx: int):
-            """Get features of unit j as seen from unit i"""
-            cur_pos = jnp.hstack((state.plane_state.north[i], state.plane_state.east[i], state.plane_state.altitude[i]))
-            enemy_pos = jnp.hstack((state.plane_state.north[j_idx], state.plane_state.east[j_idx], state.plane_state.altitude[j_idx]))
-            relative_vector = cur_pos - enemy_pos
-            
-            # 计算敌机的朝向向量
-            st = jnp.sin(state.plane_state.pitch[j_idx])
-            ct = jnp.cos(state.plane_state.pitch[j_idx])
-            spsi = jnp.sin(state.plane_state.yaw[j_idx])
-            cpsi = jnp.cos(state.plane_state.yaw[j_idx])
-            heading_vector = jnp.hstack((ct * cpsi, ct * spsi, st))
-            
-            # 计算相对向量和敌机朝向向量的点积
-            dot_product = jnp.sum(relative_vector * heading_vector)
-            
-            # 计算自机和敌机之间的距离
-            distance = jnp.linalg.norm(relative_vector, axis=0)
-            norm_delta_north = (state.plane_state.north[j_idx] - state.plane_state.north[i]) / 1000
-            norm_delta_east = (state.plane_state.east[j_idx] - state.plane_state.east[i]) / 1000
-            norm_delta_altitude = (state.plane_state.altitude[j_idx] - state.plane_state.altitude[i]) / 1000
-            norm_delta_vt = (state.plane_state.vt[j_idx] - state.plane_state.vt[i]) / 340
-            norm_AO = dot_product / (distance + 1e-6)  # 防止除以零 (飞机->他机和他机飞行方向的cos值) [-1, 1]  朝向角(cos值, 范围[-1,1])
-            # norm_distance = distance / 5000
-
-            empty_features = jnp.zeros(shape=(self.unit_features,))
-            # TODO:20000写在外面
-            return jax.lax.cond(
-                distance < 20000,
-                lambda: jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, norm_delta_vt, 
-                                    norm_AO,
-                                    # norm_distance
-                                    )),
-                lambda: empty_features
-            ) # distance < 20000时才观测到其他飞机
-        
-        def get_features(i:int, j:int) -> chex.Array: # 这段代码是一个核心观察函数，决定智能体i是否能观察到智能体j，以及获取观察到的特征。
+        def get_features(i:int, j:int) -> chex.Array:
             empty_features = jnp.zeros(shape=(self.unit_features,))
             visible = i!=j # 确保智能体不是在观察自己
             return jax.lax.cond(
                 j >= 0 & visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j],
-                lambda: _observe_features(state, i, j),
+                lambda: self._get_other_features(state, i, j),
                 lambda: empty_features
             )
         
-        def _get_own_features(state: MulAgentEnvState, i: int) -> chex.Array:
-            altitude = state.plane_state.altitude[i]
-            roll, pitch, yaw = state.plane_state.roll[i], state.plane_state.pitch[i], state.plane_state.yaw[i]
-            vt = state.plane_state.vt[i]
-            
-            norm_altitude = altitude / 1000
-            norm_vt = vt / 340
-
-            roll = wrap_PI(roll - state.target_heading)
-            pitch = wrap_PI(pitch - state.target_heading)
-            yaw = wrap_PI(yaw - state.target_heading)
-            
-            alpha, beta = wrap_PI(state.plane_state.alpha[i]), wrap_PI(state.plane_state.beta[i])
-
-            
-            P, Q, R = state.plane_state.P[i], state.plane_state.Q[i], state.plane_state.R[i]
-
-            norm_delta_north = (state.plane_state.north[i] - state.formation_positions[i, 0]) / 1000
-            norm_delta_east = (state.plane_state.east[i] - state.formation_positions[i, 1]) / 1000
-            norm_delta_altitude = (altitude - state.formation_positions[i, 2]) / 1000
-            norm_delta_vt = (vt - state.target_vt) / 340
-            
-            empty_features = jnp.zeros(shape=(self.own_features,))
-            features = jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, roll, pitch, yaw, norm_delta_vt,
-                                    norm_altitude, norm_vt, state.plane_state.overload[i], # 在新版本动力学里面，没有overload，只有ax、ay、az
-                                    alpha, beta,
-                                    P, Q, R))
-
-            return jax.lax.cond(
-                state.plane_state.is_alive[i], lambda: features, lambda: empty_features
-            )
         
         # 这段代码使用JAX的向量化操作（vmap）来高效计算所有智能体的观察特征。这里使用了两层vmap（向量化映射）创建高效的并行计算函数：
         get_all_features_for_unit_inner = jax.vmap(get_features, in_axes=(None, 0)) # 第一层vmap：get_features函数向量化in_axes=(None, 0)表示固定智能体i，对多个j值并行计算（∵函数输入是(i, j   )）。输入：智能体i和一组邻居[j1,j2,...]，输出：特征数组[features_i_j1, features_i_j2, ...]
@@ -297,32 +254,8 @@ class MulAeroPlanaxEnv(AeroPlanaxEnv[MulAgentEnvState, MulAgentEnvParams]):
         other_unit_obs = get_all_features_for_unit( 
             jnp.arange(self.num_agents), indices
         ).reshape((self.num_agents, -1))
-        """
-        图示举例
-        假设有3个智能体，top_k=2：
-        智能体IDs = [0, 1, 2]
 
-        最近邻矩阵 = [
-            [1, 2],  # 智能体0的最近邻
-            [2, 0],  # 智能体1的最近邻
-            [1, 0]   # 智能体2的最近邻
-        ]
-
-        计算结果 = [
-            [features_0_1, features_0_2],  # 智能体0的观察
-            [features_1_2, features_1_0],  # 智能体1的观察
-            [features_2_1, features_2_0]   # 智能体2的观察
-        ]
-
-        重塑后 = [
-            [f0_1_1, f0_1_2, ..., f0_2_1, f0_2_2, ...],  # 智能体0的所有特征
-            [f1_2_1, f1_2_2, ..., f1_0_1, f1_0_2, ...],  # 智能体1的所有特征
-            [f2_1_1, f2_1_2, ..., f2_0_1, f2_0_2, ...]   # 智能体2的所有特征
-        ]
-        """
-
-        # 自身特征向量化计算
-        get_all_self_features = jax.vmap(_get_own_features, in_axes=(None, 0)) # own_unit_obs是形状为(num_agents, 15)的矩阵，每行包含一个智能体的15维自身特征
+        get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
         own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
         
         # 合并自身特征与其他智能体特征

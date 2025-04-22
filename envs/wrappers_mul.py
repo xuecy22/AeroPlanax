@@ -86,7 +86,6 @@ class LogWrapper(JaxMARLWrapper):
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action
         )
-        alive_mask = state.env_state.plane_state.is_alive_or_locked
 
         # 检查回合是否结束
         ep_done = done["__all__"]
@@ -111,6 +110,5 @@ class LogWrapper(JaxMARLWrapper):
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["returned_episode"] = ep_done
-        info["alive_count"] = alive_mask.sum()
         info["success"] = info["success"]
         return obs, state, reward, done, info

@@ -131,13 +131,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     @functools.partial(jax.jit, static_argnums=(0,))
     def _decode_discrete_actions(
         self,
-        key: chex.PRNGKey,
-        state: BasePlaneState,
         actions: jnp.ndarray
     ) -> jnp.ndarray:
         """Convert discrete action index into continuous value.
         """
-        norm_act = jnp.zeros_like(actions)
+        norm_act = jnp.zeros_like(actions, dtype=jnp.float32)
         norm_act = norm_act.at[0].set(actions[0] / 30.)
         norm_act = norm_act.at[1].set(actions[1] * 2. / 40. - 1.)
         norm_act = norm_act.at[2].set(actions[2] * 2. / 40. - 1.)
@@ -288,7 +286,6 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         state_st = state_st.replace(
             time=state.time + 1
         )
-        state_st = self._step_task(key, state_st, actions, params)
 
         obs_st = self._get_obs(state_st, params)
 
@@ -296,6 +293,9 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         dones["__all__"] = state_st.done
         rewards = self.get_reward(state_st, params)
         info = {"success": state_st.success}
+
+        key, key_step = jax.random.split(key)
+        state_st, info = self._step_task(key_step, state_st, info, actions, params)
 
         # Auto-reset environment based on termination
         key, key_reset = jax.random.split(key)
@@ -318,9 +318,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
     ) -> TEnvState:
         """Initialize aeroplane state."""
         if self.agent_type == 0:
+            plane_init = jnp.zeros((self.num_agents, 26), dtype=jnp.float32)
+            plane_init = plane_init.at[:, 10].set(1.0)  # q0=1
             aeroplane_state = jax.vmap(
                 fighterplane.FighterPlaneState.create
-            )(jnp.zeros((self.num_agents, 20)))
+            )(plane_init)
             aeroplane_control_state = jax.vmap(
                 fighterplane.FighterPlaneControlState.create
             )(jnp.zeros((self.num_agents, 4)))
@@ -422,9 +424,10 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self,
         key: chex.PRNGKey,
         state: TEnvState,
+        info: Dict[str, Any],
         action: Dict[str, chex.Array],
         params: TEnvParams,
-    ) -> TEnvState:
+    ) -> Tuple[TEnvState, Dict[str, Any]]:
         """Task-specific step transition."""
         raise NotImplementedError
 
