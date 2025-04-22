@@ -88,7 +88,7 @@ for i in range(config["FOR_LOOP_EPOCHS"]):
     rng = runner_state[5]
     start_epoch = jnp.array(out['runner_state'][1])
     
-    # config["SAVEDIR"] = save_train(out, config["SAVEDIR"])
+    save_train(out, config["SAVEDIR"])
 
 if config["WANDB"]:
     wandb.finish()

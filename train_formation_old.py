@@ -59,11 +59,14 @@ config = {
     "SAVEDIR": "results/" + str_date_time + "/checkpoints",
     "GROUP": "formation",
 
-
+    # optional
+    "USE_FOR_LOOP": False,
+    "FOR_LOOP_EPOCHS": 50,
     "NUM_ENVS": 5,
     "NUM_STEPS": 100,
+    # 当不使用FOR LOOP时，当前时间步%SAVE_TIMESTEPS==0就保存
     'SAVE_TIMESTEPS': 1e3,
-    "TOTAL_TIMESTEPS": 5e3,
+    "TOTAL_TIMESTEPS": 2e3,
     "SAVE_EPOCHS":1,
     "NUM_UPDATES":1,
     "SEED": 42,
@@ -80,9 +83,13 @@ config["NUM_UPDATES"] = (
 config["SAVE_EPOCHS"]=  max(1,
     config["SAVE_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
 )
-print(f'Train = {config['TRAIN_MODE']}')
+
+if not config['USE_FOR_LOOP']:
+    config['FOR_LOOP_EPOCHS'] = 1
+
+print(f'Train = {config['TRAIN_MODE']} | {config['FOR_LOOP_EPOCHS']} * {config["NUM_UPDATES"]} epochs. ')
 if config['TRAIN_MODE']:
-    print(f'train {config["NUM_UPDATES"]} epochs. save params for every {config["SAVE_EPOCHS"]} epochs')
+    print(f'save params for every {config["NUM_UPDATES"] if config['USE_FOR_LOOP'] else config["SAVE_EPOCHS"]} epochs')
 
 class LogWrapper(JaxMARLWrapper):
     """Log the episode returns and lengths.
@@ -354,7 +361,14 @@ class Transition(NamedTuple):
     valid_action: jnp.ndarray # last_done(此时的Transition.done)和curr_done都为True时，才为False
     info: jnp.ndarray
     
-def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], train_mode: bool=True, save_epochs: int=1):
+def make_train(
+    config,
+    env : LogWrapper,
+    networks : Tuple[nn.Module,nn.Module], 
+    train_mode: bool=True, 
+    save_epochs: int=1,
+    use_for_loop: bool=False, # 为True时，将不在内部保存
+):
     (actor_network, critic_network) = networks
 
     def train(rng, train_states : Tuple[TrainState,TrainState], start_epoch : int = 0):
@@ -620,7 +634,8 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                 # NOTE: SAVE NETWORK
                 def save_model_callback(params:Tuple[Tuple[TrainState, TrainState], int]):
                     (actor_train_state, critic_train_state), current_epochs = params
-                    if (current_epochs + 1) % save_epochs == 0:                    
+                    current_epochs = current_epochs + 1
+                    if current_epochs % save_epochs == 0:                    
                         ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
                         checkpoint = {
                             "actor_params": actor_train_state.params,
@@ -633,11 +648,11 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                         ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
                         ckptr.wait_until_finished()
                         print(f"Checkpoint saved at epoch {current_epochs}")
-                    
-                jax.experimental.io_callback(save_model_callback, 
-                                            None, 
-                                            (train_states, update_steps), 
-                                            ordered=True)
+                if not use_for_loop:
+                    jax.experimental.io_callback(save_model_callback, 
+                                                None, 
+                                                (train_states, update_steps), 
+                                                ordered=True)
 
             
             metric["update_steps"] = update_steps
@@ -662,8 +677,8 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                     ))
                 jax.experimental.io_callback(callback, None, metric)
 
-            return (runner_state, update_steps), metric
-            # return (runner_state, update_steps), None
+            # return (runner_state, update_steps), metric
+            return (runner_state, update_steps), None
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -674,12 +689,12 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
             (ac_init_hstate, cr_init_hstate),
             _rng,
         )
-        runner_state, metric = jax.lax.scan(
-        # runner_state, _ = jax.lax.scan(
+        # runner_state, metric = jax.lax.scan(
+        runner_state, _ = jax.lax.scan(
             _update_step, (runner_state, start_epoch), None, config["NUM_UPDATES"]
         )
-        # return {"runner_state": runner_state}
-        return {"runner_state": runner_state, "metric": metric}
+        return {"runner_state": runner_state}
+        # return {"runner_state": runner_state, "metric": metric}
 
     return train
 
@@ -723,41 +738,25 @@ train_jit = jax.jit(make_train(
     env,
     (actor_network, critic_network),
     train_mode=config['TRAIN_MODE'],
-    save_epochs=config['SAVE_EPOCHS']
+    save_epochs=config['SAVE_EPOCHS'],
+    use_for_loop=config["USE_FOR_LOOP"]
     )
 )
 
-out = train_jit(rng, (ac_train_state, cr_train_state), start_epoch)
-# out : Dict
-# {
-#   'runner_state': (
-#                   (train_states, env_state, last_obs, last_done, hstates, rng),
-#                    update_steps{NOTE:epoch}
-#               ),
-#   'metric': metric
-# }
 
-runner_state = out['runner_state'][0]
+for i in range(config["FOR_LOOP_EPOCHS"]):
+    out = train_jit(rng, (ac_train_state, cr_train_state), start_epoch)
 
-(ac_train_state, cr_train_state) = runner_state[0]
-rng = runner_state[5]
-start_epoch = jnp.array(out['runner_state'][1])
+    runner_state = out['runner_state'][0]
 
-config["SAVEDIR"] = save_train(out, config["SAVEDIR"])
+    (ac_train_state, cr_train_state) = runner_state[0]
+    rng = runner_state[5]
+    start_epoch = jnp.array(out['runner_state'][1])
+
+    try:
+        save_train(out, config["SAVEDIR"])
+    except:
+        print('the final epoch % save epoch == 0')
 
 if config["WANDB"]:
     wandb.finish()
-
-
-output_dir = config["OUTPUTDIR"]
-Path(output_dir).mkdir(parents=True, exist_ok=True)
-import matplotlib.pyplot as plt
-plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
-plt.xlabel("Update Step")
-plt.ylabel("Return")
-plt.savefig(output_dir + '/returned_episode_returns.png')
-plt.cla()
-plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
-plt.xlabel("Update Step")
-plt.ylabel("Return")
-plt.savefig(output_dir + '/returned_episode_lengths.png')

@@ -71,7 +71,7 @@ class FormationTaskParams(EnvParams):
     max_z_increment: float = 555
     
     # 最大通信距离，超过此距离的其他agent在obs中置为0
-    max_communicate_distance: float = 50000.0
+    max_communicate_distance: float = 20000.0
 
 
 def formation_reward_EZ_fn(
@@ -80,6 +80,10 @@ def formation_reward_EZ_fn(
     agent_id: AgentID,
     reward_scale: float = 1.0,
 ) -> float:
+    '''
+    距离惩罚+预设yaw惩罚
+    在555->200的任务中确认有效
+    '''
     target_pos = state.formation_positions[agent_id]
     
     delta_north = (target_pos[0] - state.plane_state.north[agent_id])
@@ -90,7 +94,7 @@ def formation_reward_EZ_fn(
 
     reward_distance = -(norm_distance)
     amp_distance = jnp.where(norm_distance<0.25, 
-                            jnp.where(norm_distance < 0.1, 0, norm_distance / 0.25),
+                            jnp.where(norm_distance < 0.05, 0, norm_distance / 0.25),
                             1)
 
     def get_target_degree(delta_distance:float):
@@ -115,6 +119,57 @@ def formation_reward_EZ_fn(
     mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
 
     return total_reward * reward_scale * mask
+
+def formation_reward_with_other_plane_fn(
+    state: FormationTaskState,  
+    params: FormationTaskParams,
+    agent_id: AgentID,
+    reward_scale: float = 1.0,
+) -> float:
+    '''
+    ***仅用于2机环境***
+    和队友机靠得太近的惩罚（负指数），在250m外为0
+    然而，在编队任务中，由于空间的稀疏，队友机似乎影响不大
+    '''
+    delta_north = (state.plane_state.north[1-agent_id] - state.plane_state.north[agent_id])
+    delta_east = (state.plane_state.east[1-agent_id] - state.plane_state.east[agent_id])
+    delta_altitude = (state.plane_state.altitude[1-agent_id] - state.plane_state.altitude[agent_id])
+    dist = (delta_north)**2 + (delta_east)**2 + (delta_altitude)**2
+    reward_plane_distance = -(jnp.exp(-(dist - 2500.0)/10000.))
+    amp_plane_distance = jnp.where(dist > 62500, 0, 1)
+    
+    mask = state.plane_state.is_alive_or_locked[agent_id]
+
+    return reward_plane_distance * amp_plane_distance * reward_scale * mask
+
+def formation_reward_EZ_no_angle_fn(
+    state: FormationTaskState,  
+    params: FormationTaskParams,
+    agent_id: AgentID,
+    reward_scale: float = 1.0,
+) -> float:
+    '''
+    距离惩罚
+    粗糙的yaw惩罚似乎对更近的距离无效，弃用
+    在(555->200)->50的任务中确认有效
+    '''
+    target_pos = state.formation_positions[agent_id]
+    
+    delta_north = (target_pos[0] - state.plane_state.north[agent_id])
+    delta_east = (target_pos[1] - state.plane_state.east[agent_id])
+    delta_altitude = (target_pos[2] - state.plane_state.altitude[agent_id])
+
+    norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2) / 1000
+
+    reward_distance = -(norm_distance)
+
+    amp_distance = jnp.where(norm_distance < 0.1, 
+                            jnp.where(norm_distance < 0.01, 0, norm_distance / 0.1),
+                            1)
+
+    mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
+
+    return reward_distance * amp_distance * reward_scale * mask
 
 def event_driven_reward_fn(
         state: FormationTaskState,
