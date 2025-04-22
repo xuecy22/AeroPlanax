@@ -67,8 +67,10 @@ rng = jax.random.PRNGKey(config["SEED"])
 env = LogWrapper(env)
 (actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(env, config)
 
-train_jit = jax.jit(make_train(config, env, (actor_network, critic_network),train_mode=False))
+train_jit = jax.jit(make_train(config, env, (actor_network, critic_network),train_mode=True))
 
+# TODO: save in make_train()
+# dont use for loop
 for i in range(config["FOR_LOOP_EPOCHS"]):
     out = train_jit(rng, (ac_train_state, cr_train_state), start_epoch)
     # out : Dict

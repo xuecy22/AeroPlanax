@@ -31,9 +31,9 @@ _MICRO_CONFIG = {
 }
 
 _MINI_CONFIG = {
-    "NUM_ENVS": 1,
-    "NUM_STEPS": 5000,
-    "TOTAL_TIMESTEPS": 4e4,
+    "NUM_ENVS": 10,
+    "NUM_STEPS": 2000,
+    "TOTAL_TIMESTEPS": 1e5,
 }
 
 _MEDIUM_CONFIG = {
