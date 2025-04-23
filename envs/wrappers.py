@@ -26,6 +26,17 @@ class JaxMARLWrapper(object):
 
     def __getattr__(self, name: str):
         return getattr(self._env, name)
+    """
+    这段代码定义了__getattr__方法，是Python中一个特殊的魔术方法，用于属性访问转发。它的作用是：
+    当你尝试访问JaxMARLWrapper类的一个不存在的属性时，Python会自动调用__getattr__方法，然后该方法会去原始环境对象self._env中查找这个属性。
+    简单来说，这是一个代理机制，让包装器类能够"透明地"访问被包装环境的所有属性和方法，而不需要在包装器中重新定义所有属性。
+
+    例如：
+    当你调用wrapper.agents时
+    如果wrapper对象本身没有定义agents属性
+    __getattr__会将请求转发到self._env.agents并返回结果
+    这种模式在环境包装器中很常见，允许包装器只覆盖或扩展特定功能，同时保持对原始环境其他功能的访问。
+    """
 
     # def _batchify(self, x: dict):
     #     x = jnp.stack([x[a] for a in self._env.agents])
