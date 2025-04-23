@@ -26,6 +26,7 @@ def check_collision(state: BasePlaneState, agent_id, R=50):
 def check_extreme_state(state: BasePlaneState, agent_id, rotation_limit=1000.0):
     P, Q, R = state.P[agent_id], state.Q[agent_id], state.R[agent_id]
     done = jnp.sqrt(P**2 + Q**2 + R**2) > rotation_limit
+    # jax.debug.callback(lambda x: print("Extremestate is", x), done)
     return done
 
 def check_high_speed(state: BasePlaneState, agent_id, max_velocity=3):
@@ -130,4 +131,5 @@ def check_hit(plane_state: BasePlaneState, missile_state: BaseMissileState, agen
     return hit
 
 def update_blood(state: BasePlaneState, agent_id, dt):
-    return state.blood[agent_id] - 20 * dt * state.is_locked[agent_id]
+    # return state.blood[agent_id] - 20 * dt * state.is_locked[agent_id]
+    return state.blood[agent_id]
