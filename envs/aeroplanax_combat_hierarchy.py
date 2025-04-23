@@ -180,6 +180,7 @@ class HierarchicalCombatTaskState(EnvState):
             plane_state=env_state.plane_state,
             missile_state=env_state.missile_state,
             control_state=env_state.control_state,
+            pre_rewards=env_state.pre_rewards,
             done=env_state.done,
             success=env_state.success,
             time=env_state.time,
@@ -207,8 +208,8 @@ class HierarchicalCombatTaskParams(EnvParams):
     min_vt: float = 240
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
-    max_distance: float = 50000
-    min_distance: float = 50000
+    max_distance: float = 5600
+    min_distance: float = 5600
     team_spacing: float = 15000       
     safe_distance: float = 3000
 
@@ -233,6 +234,8 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             functools.partial(posture_reward_fn, reward_scale=100.0, num_allies=env_params.num_allies, num_enemies=env_params.num_enemies),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
+        self.is_potential = [False, True, True]
+        self.pre_rewards = []
 
         self.termination_conditions = [
             safe_return_fn,

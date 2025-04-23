@@ -31,6 +31,7 @@ class CombatTaskState(EnvState):
             plane_state=env_state.plane_state,
             missile_state=env_state.missile_state,
             control_state=env_state.control_state,
+            pre_rewards=env_state.pre_rewards,
             done=env_state.done,
             success=env_state.success,
             time=env_state.time
@@ -83,6 +84,7 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
             functools.partial(posture_reward_fn, reward_scale=100.0, num_allies=env_params.num_allies, num_enemies=env_params.num_enemies),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
+        self.is_potential = [False, True, True]
 
         self.termination_conditions = [
             safe_return_fn,

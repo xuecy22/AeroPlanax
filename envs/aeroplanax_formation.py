@@ -35,6 +35,7 @@ class FormationTaskState(EnvState):
             plane_state=env_state.plane_state,
             missile_state=env_state.missile_state,
             control_state=env_state.control_state,
+            pre_rewards=env_state.pre_rewards,
             done=env_state.done,
             success=env_state.success,
             time=env_state.time,
@@ -73,6 +74,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             functools.partial(formation_reward_fn, reward_scale=1.0),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
+        self.is_potential = [False, False]
 
         self.termination_conditions = [
             extreme_state_fn,
