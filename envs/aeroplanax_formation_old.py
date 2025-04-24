@@ -50,7 +50,7 @@ class FormationTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class FormationTaskParams(EnvParams):
-    num_allies: int = 5
+    num_allies: int = 10
     num_enemies: int = 0
     agent_type: int = 0     # 0: fightplane 暂时并没有什么用
     action_type: int = 1    # 1: 离散空间
