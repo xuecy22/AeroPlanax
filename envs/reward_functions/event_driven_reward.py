@@ -14,5 +14,5 @@ def event_driven_reward_fn(
     - Bad_done: -200
     """
     die = state.plane_state.is_crashed[agent_id] | state.plane_state.is_shotdown[agent_id]
-    reward = -fail_reward * die + success_reward * state.success
+    reward = fail_reward * die
     return reward

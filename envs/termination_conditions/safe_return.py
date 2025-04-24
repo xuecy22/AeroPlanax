@@ -16,10 +16,14 @@ def safe_return_fn(
     plane_state: FighterPlaneState = state.plane_state
     done = plane_state.is_shotdown[agent_id] | plane_state.is_crashed[agent_id]
     # all the enemy-aircrafts has been destroyed while current aircraft is not under attack
-    alive = plane_state.is_alive
+    alive = plane_state.is_alive | plane_state.is_locked
     die = plane_state.is_crashed | plane_state.is_shotdown
-    allies = jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, alive, True)
-    enemies = jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, True, die)
+    allies = jax.lax.select(agent_id < params.num_allies,
+                            jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, alive, True),
+                            jnp.where(jnp.arange(alive.shape[0]) >= params.num_allies, alive, True))
+    enemies = jax.lax.select(agent_id < params.num_allies,
+                             jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, True, die),
+                             jnp.where(jnp.arange(alive.shape[0]) >= params.num_allies, True, die))
     success = jnp.all(allies) & jnp.all(enemies)
     done = done | success
     return done, success
