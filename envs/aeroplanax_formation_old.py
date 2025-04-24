@@ -71,7 +71,7 @@ class FormationTaskParams(EnvParams):
     max_z_increment: float = 555
     
     # 最大通信距离，超过此距离的其他agent在obs中置为0
-    max_communicate_distance: float = 20000.0
+    max_communicate_distance: float = 50000.0
 
 
 def formation_reward_EZ_fn(
@@ -93,8 +93,8 @@ def formation_reward_EZ_fn(
     norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2) / 1000
 
     reward_distance = -(norm_distance)
-    amp_distance = jnp.where(norm_distance<0.25, 
-                            jnp.where(norm_distance < 0.05, 0, norm_distance / 0.25),
+    amp_distance = jnp.where(norm_distance<0.2, 
+                            jnp.where(norm_distance < 0.05, 0, norm_distance / 0.2),
                             1)
 
     def get_target_degree(delta_distance:float):
@@ -112,6 +112,7 @@ def formation_reward_EZ_fn(
 
     reward_angle =  reward_yaw
     amp_angle = 1.0
+    amp_angle = jnp.where(norm_distance < 0.1, 0, 1)
     # amp_angle = jnp.where(delta_yaw < 0.05, 0, 1)
 
     total_reward = reward_angle * amp_angle + reward_distance * amp_distance
@@ -498,15 +499,14 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         norm_delta_altitude = jnp.clip(norm_delta_altitude,-0.6,0.6)
         # norm_altitude = jnp.clip(norm_altitude,5.2,6.6)
 
-        # 在旧版环境中overload能直接读取，现在先采用直接计算代替
         ax, ay, az = state.plane_state.ax[i], state.plane_state.ay[i], state.plane_state.az[i]
-        overload = jnp.sqrt(ax**2+ay**2+az**2)
+        # overload = jnp.sqrt(ax**2+ay**2+az**2)
 
         norm_delta_vt = (vt - state.target_vt) / 340
         
         empty_features = jnp.zeros(shape=(self.own_features,))
         features = jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, roll, pitch, yaw, norm_delta_vt,
-                                norm_altitude, norm_vt, overload,
+                                norm_altitude, norm_vt, ax, ay, az,
                                 alpha, beta,
                                 P, Q, R))
 

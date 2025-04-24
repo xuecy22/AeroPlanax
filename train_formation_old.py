@@ -60,17 +60,17 @@ config = {
     "GROUP": "formation",
 
     # optional
-    "USE_FOR_LOOP": False,
+    "USE_FOR_LOOP": True,
     "FOR_LOOP_EPOCHS": 50,
-    "NUM_ENVS": 5,
-    "NUM_STEPS": 100,
+    "NUM_ENVS": 800,
+    "NUM_STEPS": 5000,
     # 当不使用FOR LOOP时，当前时间步%SAVE_TIMESTEPS==0就保存
-    'SAVE_TIMESTEPS': 1e3,
-    "TOTAL_TIMESTEPS": 2e3,
+    'SAVE_TIMESTEPS': 1e8,
+    "TOTAL_TIMESTEPS": 1e8,
     "SAVE_EPOCHS":1,
     "NUM_UPDATES":1,
     "SEED": 42,
-    "WANDB": False,
+    "WANDB": True,
     "TRAIN_MODE": True,
     # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
 }
@@ -648,11 +648,11 @@ def make_train(
                         ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
                         ckptr.wait_until_finished()
                         print(f"Checkpoint saved at epoch {current_epochs}")
-                if not use_for_loop:
-                    jax.experimental.io_callback(save_model_callback, 
-                                                None, 
-                                                (train_states, update_steps), 
-                                                ordered=True)
+                # if not use_for_loop:
+                #     jax.experimental.io_callback(save_model_callback, 
+                #                                 None, 
+                #                                 (train_states, update_steps), 
+                #                                 ordered=True)
 
             
             metric["update_steps"] = update_steps
@@ -668,6 +668,7 @@ def make_train(
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
+                    writer.add_scalar('eval/alive_count', metric["alive_count"][metric["returned_episode"]].mean(), env_steps)
                     print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f} AliveCount={:.3f}".format(
                         metric["update_steps"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
