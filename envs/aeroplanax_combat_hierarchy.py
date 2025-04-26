@@ -36,7 +36,7 @@ config = {
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 1,
-    "NUM_ACTORS": 2,
+    "NUM_ACTORS": 4,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -190,8 +190,8 @@ class HierarchicalCombatTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HierarchicalCombatTaskParams(EnvParams):
-    num_allies: int = 1
-    num_enemies: int = 1
+    num_allies: int = 2
+    num_enemies: int = 2
     num_missiles: int = 0
     agent_type: int = 0
     action_type: int = 1
@@ -208,10 +208,12 @@ class HierarchicalCombatTaskParams(EnvParams):
     min_vt: float = 240
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
-    max_distance: float = 5600
-    min_distance: float = 5600
-    team_spacing: float = 15000       
-    safe_distance: float = 3000
+    max_distance: float = 11000
+    min_distance: float = 11000
+    team_spacing: float = 600
+    safe_distance: float = 100
+    posture_reward_scale: float = 15.0
+    use_baseline: bool = True
 
 class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState, HierarchicalCombatTaskParams]):
     def __init__(self, env_params: Optional[HierarchicalCombatTaskParams] = None):
@@ -231,7 +233,10 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
 
         self.reward_functions = [
             functools.partial(altitude_reward_fn, reward_scale=1.0, Kv=0.2),
-            functools.partial(posture_reward_fn, reward_scale=100.0, num_allies=env_params.num_allies, num_enemies=env_params.num_enemies),
+            functools.partial(posture_reward_fn, 
+                              reward_scale=env_params.posture_reward_scale, 
+                              num_allies=env_params.num_allies, 
+                              num_enemies=env_params.num_enemies),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
         self.is_potential = [False, True, True]
@@ -245,6 +250,8 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         self.norm_delta_altitude = jnp.array([0.1, 0.0, -0.1])
         self.norm_delta_heading = jnp.array([-jnp.pi / 6, -jnp.pi / 12, 0.0, jnp.pi / 12, jnp.pi / 6])
         self.norm_delta_velocity = jnp.array([0.05, 0.0, -0.05])
+
+        self.use_baseline = env_params.use_baseline
 
     def _get_obs_size(self) -> int:
         if self.observation_type == 0:
@@ -312,6 +319,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         params: HierarchicalCombatTaskParams
     ) -> HierarchicalCombatTaskState:
         state = super()._init_state(key, params)
+        init_hstate = ScannedRNN.initialize_carry(self.num_agents, config["GRU_HIDDEN_DIM"])
         state = HierarchicalCombatTaskState.create(state, init_hstate)
         return state
 

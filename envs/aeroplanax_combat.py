@@ -58,10 +58,11 @@ class CombatTaskParams(EnvParams):
     min_vt: float = 240
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
-    max_distance: float = 50000
-    min_distance: float = 50000
-    team_spacing: float = 15000       
-    safe_distance: float = 3000
+    max_distance: float = 5600
+    min_distance: float = 5600
+    team_spacing: float = 600
+    safe_distance: float = 100
+    posture_reward_scale: float = 100.0
 
 class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
     def __init__(self, env_params: Optional[CombatTaskParams] = None):
@@ -81,7 +82,10 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
 
         self.reward_functions = [
             functools.partial(altitude_reward_fn, reward_scale=1.0, Kv=0.2),
-            functools.partial(posture_reward_fn, reward_scale=100.0, num_allies=env_params.num_allies, num_enemies=env_params.num_enemies),
+            functools.partial(posture_reward_fn, 
+                              reward_scale=env_params.posture_reward_scale, 
+                              num_allies=env_params.num_allies, 
+                              num_enemies=env_params.num_enemies),
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
         self.is_potential = [False, True, True]
