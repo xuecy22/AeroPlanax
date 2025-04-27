@@ -190,8 +190,8 @@ class HierarchicalCombatTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HierarchicalCombatTaskParams(EnvParams):
-    num_allies: int = 2
-    num_enemies: int = 2
+    num_allies: int = 1
+    num_enemies: int = 1
     num_missiles: int = 0
     agent_type: int = 0
     action_type: int = 1
@@ -208,11 +208,11 @@ class HierarchicalCombatTaskParams(EnvParams):
     min_vt: float = 240
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
-    max_distance: float = 11000
-    min_distance: float = 11000
+    max_distance: float = 5600
+    min_distance: float = 5600
     team_spacing: float = 600
     safe_distance: float = 100
-    posture_reward_scale: float = 15.0
+    posture_reward_scale: float = 100.0
     use_baseline: bool = True
 
 class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState, HierarchicalCombatTaskParams]):
@@ -272,14 +272,50 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
     ):
         # unpack actions
         actions = jnp.array([actions[i] for i in self.agents])
-        delta_altitude = self.norm_delta_altitude[actions[:, 0]]
-        delta_heading = self.norm_delta_heading[actions[:, 1]]
-        delta_vt = self.norm_delta_velocity[actions[:, 2]]
+        if not self.use_baseline:
+            delta_altitude = self.norm_delta_altitude[actions[:, 0]]
+            delta_heading = self.norm_delta_heading[actions[:, 1]]
+            delta_vt = self.norm_delta_velocity[actions[:, 2]]
 
-        target_altitude = init_state.plane_state.altitude + delta_altitude * 1000
-        target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
-        target_vt = init_state.plane_state.vt + delta_vt * 340
+            target_altitude = init_state.plane_state.altitude + delta_altitude * 1000
+            target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+            target_vt = init_state.plane_state.vt + delta_vt * 340
+        else:
+            ego_delta_altitude = self.norm_delta_altitude[actions[:self.num_allies, 0]]
+            ego_delta_heading = self.norm_delta_heading[actions[:self.num_allies, 1]]
+            ego_delta_vt = self.norm_delta_velocity[actions[:self.num_allies, 2]]
+            
+            ego_x = init_state.plane_state.north[self.num_allies:]
+            ego_y = init_state.plane_state.east[self.num_allies:]
+            ego_z = init_state.plane_state.altitude[self.num_allies:]
 
+            ego_vx = init_state.plane_state.vel_x[self.num_allies:]
+            ego_vy = init_state.plane_state.vel_y[self.num_allies:]
+            
+            enm_x = init_state.plane_state.north[:self.num_allies]
+            enm_y = init_state.plane_state.east[:self.num_allies]
+            enm_z = init_state.plane_state.altitude[:self.num_allies]
+            # delta altitude
+            enm_delta_altitude = enm_z - ego_z
+            # delta heading
+            ego_v = jnp.linalg.norm(jnp.vstack((ego_vx, ego_vy)), axis=0)
+            delta_x, delta_y = enm_x - ego_x, enm_y - ego_y
+            R = jnp.linalg.norm(jnp.vstack((delta_x, delta_y)), axis=0)
+            proj_dist = delta_x * ego_vx + delta_y * ego_vy
+            ego_AO = jnp.arccos(jnp.clip(proj_dist / (R * ego_v + 1e-6), -1, 1))
+            # side_flag = jnp.sign(jnp.cross(jnp.vstack((ego_vx, ego_vy)), jnp.vstack((delta_x, delta_y))))
+            side_flag = jnp.sign(ego_vx * delta_y - ego_vy * delta_x)
+            enm_delta_heading = ego_AO * side_flag
+            # delta velocity
+            enm_delta_vt = init_state.plane_state.vt[:self.num_allies] - init_state.plane_state.vt[self.num_allies:]
+            
+            delta_altitude = jnp.hstack((ego_delta_altitude, enm_delta_altitude))
+            delta_heading = jnp.hstack((ego_delta_heading, enm_delta_heading))
+            delta_vt = jnp.hstack((ego_delta_vt, enm_delta_vt))
+            
+            target_altitude = init_state.plane_state.altitude + delta_altitude
+            target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+            target_vt = init_state.plane_state.vt + delta_vt
         last_obs = self._get_controller_obs(state.plane_state, target_altitude, target_heading, target_vt)
         last_obs = jnp.transpose(last_obs)
         last_done = jnp.zeros((self.num_agents), dtype=bool)
