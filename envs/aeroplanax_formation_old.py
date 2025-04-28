@@ -18,9 +18,17 @@ from flax import struct
 from gymnax.environments import spaces
 from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
 from .core.simulators.fighterplane.dynamics import FighterPlaneState
-
+from .reward_functions import (
+    formation_reward_EZ_fn,
+    overload_penalty_fn,
+    formation_reward_with_other_plane_fn,
+    formation_reward_EZ_no_angle_fn,
+    event_driven_reward_fn,
+    crash_reward_fn,
+)
 from .termination_conditions import (
     crashed_fn,
+    unreach_formation_fn
 )
 
 from .utils.utils import wrap_PI, wedge_formation, line_formation, diamond_formation, enforce_safe_distance
@@ -77,187 +85,6 @@ class FormationTaskParams(EnvParams):
     # 最大通信距离，超过此距离的其他agent在obs中置为0
     max_communicate_distance: float = 20000.0
 
-
-def formation_reward_EZ_fn(
-    state: FormationTaskState,  
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    reward_scale: float = 1.0,
-) -> float:
-    '''
-    距离惩罚+预设yaw惩罚
-    在555->200的任务中确认有效
-    '''
-    target_pos = state.formation_positions[agent_id]
-    
-    delta_north = (target_pos[0] - state.plane_state.north[agent_id])
-    delta_east = (target_pos[1] - state.plane_state.east[agent_id])
-    delta_altitude = (target_pos[2] - state.plane_state.altitude[agent_id])
-
-    norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2) / 1000
-
-    reward_distance = -(norm_distance)
-    amp_distance = jnp.where(norm_distance<0.25, 
-                            jnp.where(norm_distance < 0.05, 0, norm_distance / 0.25),
-                            1)
-
-    def get_target_degree(delta_distance:float):
-        abs_distance = jnp.abs(delta_distance)
-        return jnp.sign(delta_distance) * jnp.where(abs_distance < 10000.0,
-                                        jnp.where(abs_distance < 100.0, 0, 25.0 * jnp.log10(abs_distance) - 50.0,),
-                                        50.0
-                                        )
-
-
-    target_yaw = get_target_degree(delta_east) * jnp.pi / 180 + state.target_heading
-
-    delta_yaw = jnp.abs(wrap_PI(target_yaw - wrap_PI(state.plane_state.yaw[agent_id])))
-    reward_yaw =  -((delta_yaw / (jnp.pi/4)))
-
-    reward_angle =  reward_yaw
-    amp_angle = 1.0
-    # amp_angle = jnp.where(delta_yaw < 0.05, 0, 1)
-
-    total_reward = reward_angle * amp_angle + reward_distance * amp_distance
-
-    mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
-
-    return total_reward * reward_scale * mask
-
-# =================================================
-# === 2. 在现有 reward 函数区域新增 ===
-def overload_penalty_fn(
-    state: FormationTaskState,
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    k: float = 1.0,          # 指数衰减速率，可自行调节
-) -> float:
-    """
-    z 向过载惩罚(az 已以 g 为单位):
-        0 - 3 g  : 不惩罚      →  0
-        3 - 10 g : 指数递减    →  (0, -1)
-        ≥10 g    : 最大惩罚    →  -1
-    """
-    az = jnp.abs(state.plane_state.az[agent_id])          # 取得当前 az(g)
-    # 分段计算
-    penalty = jnp.where(
-        az <= 3.0,
-        0.0,
-        jnp.where(
-            az <= 10.0,
-            -(jnp.exp(k * (az - 3.0)) - 1.0) / (jnp.exp(k * 3.0) - 1.0),
-            -1.0,
-        ),
-    )
-    # 只对存活 / 被锁定的飞机生效
-    mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
-    return penalty * mask
-# =================================================
-
-def formation_reward_with_other_plane_fn(
-    state: FormationTaskState,  
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    reward_scale: float = 1.0,
-) -> float:
-    '''
-    ***仅用于2机环境***
-    和队友机靠得太近的惩罚（负指数），在250m外为0
-    然而，在编队任务中，由于空间的稀疏，队友机似乎影响不大
-    '''
-    delta_north = (state.plane_state.north[1-agent_id] - state.plane_state.north[agent_id])
-    delta_east = (state.plane_state.east[1-agent_id] - state.plane_state.east[agent_id])
-    delta_altitude = (state.plane_state.altitude[1-agent_id] - state.plane_state.altitude[agent_id])
-    dist = (delta_north)**2 + (delta_east)**2 + (delta_altitude)**2
-    reward_plane_distance = -(jnp.exp(-(dist - 2500.0)/10000.))
-    amp_plane_distance = jnp.where(dist > 62500, 0, 1)
-    
-    mask = state.plane_state.is_alive_or_locked[agent_id]
-
-    return reward_plane_distance * amp_plane_distance * reward_scale * mask
-
-def formation_reward_EZ_no_angle_fn(
-    state: FormationTaskState,  
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    reward_scale: float = 1.0,
-) -> float:
-    '''
-    距离惩罚
-    粗糙的yaw惩罚似乎对更近的距离无效，弃用
-    在(555->200)->50的任务中确认有效
-    '''
-    target_pos = state.formation_positions[agent_id]
-    
-    delta_north = (target_pos[0] - state.plane_state.north[agent_id])
-    delta_east = (target_pos[1] - state.plane_state.east[agent_id])
-    delta_altitude = (target_pos[2] - state.plane_state.altitude[agent_id])
-
-    norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2) / 1000
-
-    reward_distance = -(norm_distance)
-
-    amp_distance = jnp.where(norm_distance < 0.1, 
-                            jnp.where(norm_distance < 0.01, 0, norm_distance / 0.1),
-                            1)
-
-    mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
-
-    return reward_distance * amp_distance * reward_scale * mask
-
-def event_driven_reward_fn(
-        state: FormationTaskState,
-        params: FormationTaskParams,
-        agent_id: AgentID,
-        success_reward: float = 200
-    ) -> float:
-    """
-    Reward is given when the following event happens:
-    - Done: +200
-    """
-    return state.done * state.success * success_reward
-
-def crash_reward_fn(
-    state: FormationTaskState,
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    reward: float = -1000,
-    ) -> float:
-    """
-    Reward is given when the plane is alive
-    """
-    # 只给上个step还存活，但这个step失败的agent fail_reward
-    # 不过在训练的版本中，上个step和本step都死亡的agent的经验被丢弃了，因此这里只是给debug看的
-    return (~state.last_is_crashed[agent_id]) *state.plane_state.is_crashed[agent_id] * reward
-
-def unreach_formation_fn(
-    state: FormationTaskState,
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    max_check_interval: int = 200,
-    min_check_interval: int = 2,
-    valid_distance: int = 100
-) -> Tuple[bool, bool]:
-    """
-    End up the simulation if the aircraft didn't reach the target heading or attitude in limited time.
-    """
-    plane_state: FighterPlaneState = state.plane_state
-    target_pos = state.formation_positions[agent_id]
-    current_pos = jnp.array([plane_state.north[agent_id], plane_state.east[agent_id], plane_state.altitude[agent_id]])
-    distance = jnp.linalg.norm(target_pos - current_pos)
-    check_time = state.time
-    # 判断时间
-    max_check_interval = max_check_interval * params.sim_freq / params.agent_interaction_steps
-    min_check_interval = min_check_interval * params.sim_freq / params.agent_interaction_steps
-    mask1 = check_time <= max_check_interval
-    mask2 = check_time >= min_check_interval
-    mask3 = distance < valid_distance
-
-    mask4 = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
-    success = mask1 & mask2 & mask3 & mask4
-    # 任务成功或超时, 则任务结束
-    done = success | jnp.logical_not(mask1)
-    return done, success
 
 class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskParams]):
     def __init__(self, env_params: Optional[FormationTaskParams] = None):

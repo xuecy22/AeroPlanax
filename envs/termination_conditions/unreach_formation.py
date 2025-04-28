@@ -7,7 +7,7 @@ from ..utils.utils import wrap_PI
 
 import jax
 def unreach_formation_fn(
-    state: TEnvState,
+    state: TEnvState,  
     params: TEnvParams,
     agent_id: AgentID,
     max_check_interval: int = 200,
@@ -29,7 +29,7 @@ def unreach_formation_fn(
     mask2 = check_time >= min_check_interval
     mask3 = distance < valid_distance
 
-    mask4 = state.plane_state.is_alive_or_locked[agent_id]
+    mask4 = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
     success = mask1 & mask2 & mask3 & mask4
     # 任务成功或超时, 则任务结束
     done = success | jnp.logical_not(mask1)
