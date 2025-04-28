@@ -124,6 +124,36 @@ def formation_reward_EZ_fn(
 
     return total_reward * reward_scale * mask
 
+# =================================================
+# === 2. 在现有 reward 函数区域新增 ===
+def overload_penalty_fn(
+    state: FormationTaskState,
+    params: FormationTaskParams,
+    agent_id: AgentID,
+    k: float = 1.0,          # 指数衰减速率，可自行调节
+) -> float:
+    """
+    z 向过载惩罚(az 已以 g 为单位):
+        0 - 3 g  : 不惩罚      →  0
+        3 - 10 g : 指数递减    →  (0, -1)
+        ≥10 g    : 最大惩罚    →  -1
+    """
+    az = jnp.abs(state.plane_state.az[agent_id])          # 取得当前 az(g)
+    # 分段计算
+    penalty = jnp.where(
+        az <= 3.0,
+        0.0,
+        jnp.where(
+            az <= 10.0,
+            -(jnp.exp(k * (az - 3.0)) - 1.0) / (jnp.exp(k * 3.0) - 1.0),
+            -1.0,
+        ),
+    )
+    # 只对存活 / 被锁定的飞机生效
+    mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
+    return penalty * mask
+# =================================================
+
 def formation_reward_with_other_plane_fn(
     state: FormationTaskState,  
     params: FormationTaskParams,
@@ -237,7 +267,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         self.ego_topK = env_params.ego_topK
         self.formation_type = env_params.formation_type
         self.unit_features: int= 5
-        self.own_features: int= 15
+        self.own_features: int= 18
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
             agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
@@ -247,6 +277,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         }
 
         self.reward_functions = [
+            # functools.partial(overload_penalty_fn, k=1.0),
             functools.partial(formation_reward_EZ_fn, reward_scale=1.0),
             functools.partial(crash_reward_fn, reward=-1000),
             functools.partial(event_driven_reward_fn, success_reward=200),
@@ -338,8 +369,9 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         def get_features(i:int, j:int) -> chex.Array:
             empty_features = jnp.zeros(shape=(self.unit_features,))
             visible = i!=j
+            cond = (j >= 0) & visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j]
             return jax.lax.cond(
-                j >= 0 & visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j],
+                cond,
                 lambda: self._get_other_features(state, i, j),
                 lambda: empty_features
             )
@@ -512,7 +544,8 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         features = jnp.hstack((norm_delta_north, norm_delta_east, norm_delta_altitude, roll, pitch, yaw, norm_delta_vt,
                                 norm_altitude, norm_vt, overload,
                                 alpha, beta,
-                                P, Q, R))
+                                P, Q, R,
+                                ax, ay, az))
 
         return jax.lax.cond(
             state.plane_state.is_alive[i], lambda: features, lambda: empty_features
