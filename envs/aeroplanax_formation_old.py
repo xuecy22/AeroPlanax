@@ -64,7 +64,7 @@ class FormationTaskParams(EnvParams):
     action_type: int = 1    # 1: 离散空间
 
     sim_freq: int = 50
-    agent_interaction_steps: int = 10
+    agent_interaction_steps: int = 1
 
     noise_scale: float = 0.0
     # global_obs和ego_obs最近邻数量
@@ -104,7 +104,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         }
 
         self.reward_functions = [
-            # functools.partial(overload_penalty_fn, k=1.0),
+            functools.partial(overload_penalty_fn, k=1.0),
             functools.partial(formation_reward_EZ_fn, reward_scale=1.0),
             functools.partial(crash_reward_fn, reward=-1000),
             functools.partial(event_driven_reward_fn, success_reward=200),
