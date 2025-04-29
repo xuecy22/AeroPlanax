@@ -71,7 +71,7 @@ class FormationTaskParams(EnvParams):
     max_z_increment: float = 555
     
     # 最大通信距离，超过此距离的其他agent在obs中置为0
-    max_communicate_distance: float = 50000.0
+    max_communicate_distance: float = 50000
 
 
 def formation_reward_EZ_fn(
@@ -113,7 +113,6 @@ def formation_reward_EZ_fn(
     reward_angle =  reward_yaw
     amp_angle = 1.0
     amp_angle = jnp.where(norm_distance < 0.1, 0, 1)
-    # amp_angle = jnp.where(delta_yaw < 0.05, 0, 1)
 
     total_reward = reward_angle * amp_angle + reward_distance * amp_distance
 
@@ -121,68 +120,27 @@ def formation_reward_EZ_fn(
 
     return total_reward * reward_scale * mask
 
-def formation_reward_with_other_plane_fn(
-    state: FormationTaskState,  
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    reward_scale: float = 1.0,
-) -> float:
-    '''
-    ***仅用于2机环境***
-    和队友机靠得太近的惩罚（负指数），在250m外为0
-    然而，在编队任务中，由于空间的稀疏，队友机似乎影响不大
-    '''
-    delta_north = (state.plane_state.north[1-agent_id] - state.plane_state.north[agent_id])
-    delta_east = (state.plane_state.east[1-agent_id] - state.plane_state.east[agent_id])
-    delta_altitude = (state.plane_state.altitude[1-agent_id] - state.plane_state.altitude[agent_id])
-    dist = (delta_north)**2 + (delta_east)**2 + (delta_altitude)**2
-    reward_plane_distance = -(jnp.exp(-(dist - 2500.0)/10000.))
-    amp_plane_distance = jnp.where(dist > 62500, 0, 1)
-    
-    mask = state.plane_state.is_alive_or_locked[agent_id]
-
-    return reward_plane_distance * amp_plane_distance * reward_scale * mask
-
-def formation_reward_EZ_no_angle_fn(
-    state: FormationTaskState,  
-    params: FormationTaskParams,
-    agent_id: AgentID,
-    reward_scale: float = 1.0,
-) -> float:
-    '''
-    距离惩罚
-    粗糙的yaw惩罚似乎对更近的距离无效，弃用
-    在(555->200)->50的任务中确认有效
-    '''
+def event_driven_reward_fn(
+        state: FormationTaskState,
+        params: FormationTaskParams,
+        agent_id: AgentID,
+        success_reward: float = 200,
+        valid_distance: float = 200
+    ) -> float:
+    """
+    每个飞机单独计算，防止因为一架飞机crash导致其他正常飞机无法获得reward
+    """
     target_pos = state.formation_positions[agent_id]
     
     delta_north = (target_pos[0] - state.plane_state.north[agent_id])
     delta_east = (target_pos[1] - state.plane_state.east[agent_id])
     delta_altitude = (target_pos[2] - state.plane_state.altitude[agent_id])
 
-    norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2) / 1000
-
-    reward_distance = -(norm_distance)
-
-    amp_distance = jnp.where(norm_distance < 0.1, 
-                            jnp.where(norm_distance < 0.01, 0, norm_distance / 0.1),
-                            1)
+    norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2)
 
     mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
 
-    return reward_distance * amp_distance * reward_scale * mask
-
-def event_driven_reward_fn(
-        state: FormationTaskState,
-        params: FormationTaskParams,
-        agent_id: AgentID,
-        success_reward: float = 200
-    ) -> float:
-    """
-    Reward is given when the following event happens:
-    - Done: +200
-    """
-    return state.done * state.success * success_reward
+    return state.done * mask * jnp.where(norm_distance < valid_distance, success_reward, 0)
 
 def crash_reward_fn(
     state: FormationTaskState,
@@ -234,7 +192,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         self.ego_topK = env_params.ego_topK
         self.formation_type = env_params.formation_type
         self.unit_features: int= 5
-        self.own_features: int= 15
+        self.own_features: int= 17
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
             agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
@@ -311,12 +269,14 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             
             - [0]. norm_altitude          (unit: 1km)
             - [1]. norm_vt                (unit: mh)
-            - [2]. accelearate            (unit: i dont know)
-            - [3]. ego_alpha
-            - [4]. ego_beta
-            - [5]. ego_P                  (unit: rad/s)
-            - [6]. ego_Q                  (unit: rad/s)
-            - [7]. ego_R                  (unit: rad/s)
+            - [2]. ax            (unit: idk/10)
+            - [3]. ay            (unit: idk/10)
+            - [4]. az            (unit: idk/10)
+            - [5]. ego_alpha
+            - [6]. ego_beta
+            - [7]. ego_P                  (unit: rad/s)
+            - [8]. ego_Q                  (unit: rad/s)
+            - [9]. ego_R                  (unit: rad/s)
         - team observation(dim 6)
             - [0] delta_norm_north   (unit: 1km)
             - [1] delta_norm_east   (unit: 1km)
@@ -336,7 +296,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             empty_features = jnp.zeros(shape=(self.unit_features,))
             visible = i!=j
             return jax.lax.cond(
-                j >= 0 & visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j],
+                (j >= 0) & visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j],
                 lambda: self._get_other_features(state, i, j),
                 lambda: empty_features
             )
@@ -499,7 +459,8 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         norm_delta_altitude = jnp.clip(norm_delta_altitude,-0.6,0.6)
         # norm_altitude = jnp.clip(norm_altitude,5.2,6.6)
 
-        ax, ay, az = state.plane_state.ax[i], state.plane_state.ay[i], state.plane_state.az[i]
+        # NOTE: abs(a) > 10 -> crash
+        ax, ay, az = state.plane_state.ax[i]/10, state.plane_state.ay[i]/10, state.plane_state.az[i]/10
         # overload = jnp.sqrt(ax**2+ay**2+az**2)
 
         norm_delta_vt = (vt - state.target_vt) / 340

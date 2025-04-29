@@ -3,9 +3,9 @@
 ***UNCHECKED***
 '''
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
-# os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.7'
+# os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 import jax
 import chex
@@ -34,7 +34,7 @@ from envs.aeroplanax_formation_old import (
 )
 # NOTE:第一维（推力）的维度需要与env中的decode方式对应
 MAPPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
-env_params = TaskParams()
+env_params = TaskParams(num_allies=5,max_communicate_distance=0)
 env = Env(env_params)
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
@@ -61,7 +61,7 @@ config = {
 
     # optional
     "USE_FOR_LOOP": True,
-    "FOR_LOOP_EPOCHS": 50,
+    "FOR_LOOP_EPOCHS": 100,
     "NUM_ENVS": 800,
     "NUM_STEPS": 5000,
     # 当不使用FOR LOOP时，当前时间步%SAVE_TIMESTEPS==0就保存
@@ -69,12 +69,13 @@ config = {
     "TOTAL_TIMESTEPS": 1e8,
     "SAVE_EPOCHS":1,
     "NUM_UPDATES":1,
-    "SEED": 42,
+    "SEED": 514,
     "WANDB": True,
     "TRAIN_MODE": True,
-    # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
+    # "LOADDIR": "/home/bbnc/lxy/AeroPlanax/results/2025-04-24-16-54/checkpoints/checkpoint_epoch_1250" 
 }
 
+wandb_name = f'navigation_seed_{config["SEED"]}_{env_params.num_allies}agent_{env_params.max_communicate_distance}com'
 assert(isinstance(config['TRAIN_MODE'], bool))
 
 config["NUM_UPDATES"] = (
@@ -720,7 +721,7 @@ if config["WANDB"]:
     wandb.init(
         project="AeroPlanax",
         config=config,
-        name=f'seed_{config["SEED"]}',
+        name=wandb_name,
         group=config['GROUP'],
         notes='form',
         reinit=True,
