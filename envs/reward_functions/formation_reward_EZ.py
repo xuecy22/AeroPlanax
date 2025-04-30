@@ -1,51 +1,56 @@
 import jax.numpy as jnp
+import jax
 from ..aeroplanax import TEnvState, TEnvParams, AgentID
 from ..utils.utils import wrap_PI
-import jax
 
 
-def formation_reward_EZ_fn(
-    state: TEnvState,  
+def formation_reward_EZ_norm_fn(
+    state: TEnvState,
     params: TEnvParams,
     agent_id: AgentID,
     reward_scale: float = 1.0,
 ) -> float:
-    '''
-    距离惩罚+预设yaw惩罚
-    在555->200的任务中确认有效
-    '''
-    target_pos = state.formation_positions[agent_id]
-    
-    delta_north = (target_pos[0] - state.plane_state.north[agent_id])
-    delta_east = (target_pos[1] - state.plane_state.east[agent_id])
-    delta_altitude = (target_pos[2] - state.plane_state.altitude[agent_id])
+    """
+    ## 编队奖励（归一化版）
+    - 距离       0-50  m      ⇒ 0   （无惩罚）
+                50-250 m      ⇒ 线性到 -1
+    - 航向误差   0-3   deg    ⇒ 0
+                3-45  deg    ⇒ 线性到 -1
+    - 总奖励     两项平均，结果 ∈ [-1, 0]
+    """
+    # ---------------- ① 计算空间距离 ----------------
+    tgt_pos = state.formation_positions[agent_id]
+    cur_pos = jnp.array([state.plane_state.north[agent_id],
+                         state.plane_state.east[agent_id],
+                         state.plane_state.altitude[agent_id]])
 
-    norm_distance = jnp.sqrt((delta_north)**2 + (delta_east)**2 + (delta_altitude)**2) / 1000
+    distance = jnp.linalg.norm(tgt_pos - cur_pos)            # 单位 m
+    dist_penalty = jnp.clip((distance - 50.0) / 200.0, 0.0, 1.0)
+    reward_dist = -dist_penalty                              # ∈ [-1, 0]
 
-    reward_distance = -(norm_distance)
-    amp_distance = jnp.where(norm_distance<0.25, 
-                            jnp.where(norm_distance < 0.05, 0, norm_distance / 0.25),
-                            1)
+    # ---------------- ② 计算航向误差 ----------------
+    # 先根据左右偏差估算目标 yaw
+    delta_east = tgt_pos[1] - cur_pos[1]
 
-    def get_target_degree(delta_distance:float):
-        abs_distance = jnp.abs(delta_distance)
-        return jnp.sign(delta_distance) * jnp.where(abs_distance < 10000.0,
-                                        jnp.where(abs_distance < 100.0, 0, 25.0 * jnp.log10(abs_distance) - 50.0,),
-                                        50.0
-                                        )
+    def get_target_degree(d_east: float):
+        abs_d = jnp.abs(d_east)
+        deg = jnp.where(
+            abs_d < 1e-6,           0.0,                     # 避免 log(0)
+            25.0 * jnp.log10(abs_d) - 50.0
+        )
+        return jnp.clip(deg, -50.0, 50.0)
 
+    target_yaw = (get_target_degree(delta_east) * jnp.pi / 180.0
+                  + state.target_heading)
 
-    target_yaw = get_target_degree(delta_east) * jnp.pi / 180 + state.target_heading
+    yaw_err = jnp.abs(wrap_PI(target_yaw - wrap_PI(state.plane_state.yaw[agent_id])))
+    yaw_penalty = jnp.clip((yaw_err - 3.0 * jnp.pi / 180.0) /  (42.0 * jnp.pi / 180.0), 0.0, 1.0)
+    reward_yaw = -yaw_penalty                                # ∈ [-1, 0]
 
-    delta_yaw = jnp.abs(wrap_PI(target_yaw - wrap_PI(state.plane_state.yaw[agent_id])))
-    reward_yaw =  -((delta_yaw / (jnp.pi/4)))
+    # ---------------- ③ 加权合并并归一 ----------------
+    total_reward = 0.5 * (reward_dist + reward_yaw)          # ∈ [-1, 0]
 
-    reward_angle =  reward_yaw
-    amp_angle = 1.0
-    # amp_angle = jnp.where(delta_yaw < 0.05, 0, 1)
-
-    total_reward = reward_angle * amp_angle + reward_distance * amp_distance
-
+    # 仅对存活 / 被锁定飞机生效
     mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
 
     return total_reward * reward_scale * mask

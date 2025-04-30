@@ -4,7 +4,7 @@ from .formation_reward import formation_reward_fn, altitude_punishment_fn, forma
 from .missile_posture_reward import missile_posture_reward_fn
 from .alive_reward import alive_reward_fn
 from .crash_reward import crash_reward_fn, low_altitude_reward_fn
-from .formation_reward_EZ import formation_reward_EZ_fn
+from .formation_reward_EZ import formation_reward_EZ_norm_fn
 from .overload_penalty import overload_penalty_fn
 from .formation_reward_with_other_plane import formation_reward_with_other_plane_fn
 from .formation_reward_EZ_no_angle import formation_reward_EZ_no_angle_fn
