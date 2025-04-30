@@ -240,7 +240,6 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             functools.partial(event_driven_reward_fn, fail_reward=-200, success_reward=200),
         ]
         self.is_potential = [False, True, True]
-        self.pre_rewards = []
 
         self.termination_conditions = [
             safe_return_fn,

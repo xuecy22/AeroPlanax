@@ -55,6 +55,7 @@ def check_overload(state: BasePlaneState, agent_id, max_overload=10.0):
     mask2 = jnp.abs(state.ay[agent_id]) >= max_overload
     mask3 = jnp.abs(state.az[agent_id]) >= max_overload
     done = mask1 | mask2 | mask3
+    # jax.debug.callback(lambda x: print("Overload is", x), done)
     return done
 
 def check_crashed(state: BasePlaneState, agent_id):

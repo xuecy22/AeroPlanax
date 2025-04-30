@@ -5,3 +5,4 @@ from .missile_posture_reward import missile_posture_reward_fn
 from .alive_reward import alive_reward_fn
 from .altitude_reward import altitude_reward_fn
 from .posture_reward import posture_reward_fn
+from .formation_reward_EZ import formation_reward_EZ_fn
