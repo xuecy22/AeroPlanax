@@ -522,10 +522,10 @@ config = {
     "GROUP": "combat",
     "SEED": 42,
     "LR": 3e-4,
-    "NUM_ENVS": 300,
-    "NUM_ACTORS": 2,
+    "NUM_ENVS": 10,
+    "NUM_ACTORS": 4,
     "NUM_STEPS": 1000,
-    "TOTAL_TIMESTEPS": 3e8,
+    "TOTAL_TIMESTEPS": 1e5,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -564,28 +564,30 @@ Path(output_dir).mkdir(parents=True, exist_ok=True)
 save_dir = config["SAVEDIR"]
 Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-rng = jax.random.PRNGKey(seed)
-train_jit = jax.jit(make_train(config))
-out = train_jit(rng)
+for _ in range(50):
+    rng = jax.random.PRNGKey(seed)
+    train_jit = jax.jit(make_train(config))
+    out = train_jit(rng)
+
+    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+    checkpoint = {
+        "params": out['runner_state'][0][0].params,
+        "opt_state": out['runner_state'][0][0].opt_state,
+        "epoch": jnp.array(out['runner_state'][1])
+    }
+    checkpoint_path = os.path.abspath(os.path.join(config["SAVEDIR"], f"checkpoint_epoch_{out['runner_state'][1]}"))
+    ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
+    ckptr.wait_until_finished()
+    print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
+    config["LOADDIR"] = checkpoint_path
+
 wandb.finish()
-
-ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-checkpoint = {
-    "params": out['runner_state'][0][0].params,
-    "opt_state": out['runner_state'][0][0].opt_state,
-    "epoch": jnp.array(out['runner_state'][1])
-}
-checkpoint_path = os.path.abspath(os.path.join(config["SAVEDIR"], f"checkpoint_epoch_{out['runner_state'][1]}"))
-ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
-ckptr.wait_until_finished()
-print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
-
-plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
-plt.xlabel("Update Step")
-plt.ylabel("Return")
-plt.savefig(output_dir + '/returned_episode_returns.png')
-plt.cla()
-plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
-plt.xlabel("Update Step")
-plt.ylabel("Return")
-plt.savefig(output_dir + '/returned_episode_lengths.png')
+# plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
+# plt.xlabel("Update Step")
+# plt.ylabel("Return")
+# plt.savefig(output_dir + f'/returned_episode_returns_epoch_{out['runner_state'][1]}.png')
+# plt.cla()
+# plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
+# plt.xlabel("Update Step")
+# plt.ylabel("Return")
+# plt.savefig(output_dir + f'/returned_episode_lengths_epoch_{out['runner_state'][1]}.png')

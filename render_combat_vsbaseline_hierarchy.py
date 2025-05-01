@@ -17,7 +17,7 @@ from flax.training.train_state import TrainState
 import distrax
 import optax
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_combat_hierarchy import AeroPlanaxHierarchicalCombatEnv, HierarchicalCombatTaskParams
+from envs.aeroplanax_combat_hierarchy import AeroPlanaxHierarchicalCombatEnv, HierarchicalCombatTaskParams, HierarchicalCombatTaskState
 import orbax.checkpoint as ocp
 
 
@@ -249,7 +249,8 @@ def test(config, rng):
     for _ in range(1000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
-        print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}, Episodic_return: {test_state[0].returned_episode_returns}, Status: {env_state.plane_state.status}')
+        assert isinstance(env_state, HierarchicalCombatTaskState)
+        print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}, Episodic_return: {test_state[0].returned_episode_returns}, Status: {env_state.plane_state.status}  blood: {env_state.plane_state.blood}')
         
     return {"test_state": test_state, "trajectory": traj_batch}
 

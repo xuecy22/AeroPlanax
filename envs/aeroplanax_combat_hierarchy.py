@@ -1,3 +1,10 @@
+'''
+envs/core/utils.py.check_locked().R
+锁定半径有点长（比通信距离还长)
+
+envs/core/utils.py.update_blood()
+血量更新函数
+'''
 from typing import Dict, Optional, Sequence, Any, Tuple
 from jax import Array
 from jax.typing import ArrayLike
@@ -49,7 +56,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\heading_baseline"
+    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\baseline"
 }
 
 
@@ -190,8 +197,8 @@ class HierarchicalCombatTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HierarchicalCombatTaskParams(EnvParams):
-    num_allies: int = 1
-    num_enemies: int = 1
+    num_allies: int = 2
+    num_enemies: int = 2
     num_missiles: int = 0
     agent_type: int = 0
     action_type: int = 1
@@ -394,6 +401,8 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         params: HierarchicalCombatTaskParams,
     ) -> Tuple[HierarchicalCombatTaskState, Dict[str, Any]]:
         """Task-specific step transition."""
+        alive_mask = state.plane_state.is_alive | state.plane_state.is_locked
+        info['alive_count'] = alive_mask.sum()
         return state, info
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -448,8 +457,13 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             state.plane_state.is_alive[i], lambda: features, lambda: empty_features
         )
 
+    @functools.partial(jax.jit, static_argnums=(0,))
     def get_obs_unit_list(self, state: HierarchicalCombatTaskState) -> Dict[str, chex.Array]:
         """Applies observation function to state."""
+
+        pos = jnp.vstack((state.plane_state.north, state.plane_state.east, state.plane_state.altitude)).T
+        
+        visible_mask = compute_visibility_mask(pos, self.num_allies, comm_radius=50000, find_radius=50000)
 
         def get_features(i, j):
             """Get features of unit j as seen from unit i"""
@@ -466,7 +480,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             )
             empty_features = jnp.zeros(shape=(self.unit_features,))
             features = self._observe_features(state, i, j_idx)
-            visible = features[-1] < 2
+            visible = visible_mask[i, j_idx]
             return jax.lax.cond(
                 visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j_idx],
                 lambda: features,
@@ -579,3 +593,50 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             altitude=formation_positions[:, 2]
         ))
         return state
+
+
+
+def compute_visibility_mask(pos: jnp.ndarray, k: int, comm_radius: float, find_radius: float) -> jnp.ndarray:
+    """
+    计算每个 agent 最终可以“看见”哪些其他 agent(通过通信半径、发现半径和同阵营多跳共享)
+
+    参数:
+    - pos: shape (n, 3)，所有 agent 的位置
+    - k: 前 k 个 agent 是 A 方，其余是 B 方
+    - comm_radius: 通信半径
+    - find_radius: 发现半径
+
+    返回:
+    - visible_mask: shape (n, n), bool, [i, j] == True 表示 i 能看见 j
+    """
+
+    diff = pos[:, None, :] - pos[None, :, :]  # (n, n, 3)
+    dist = jnp.linalg.norm(diff, axis=-1)     # (n, n)
+
+    comm_mask = dist < comm_radius            # shape (n, n)
+
+    n = pos.shape[0]
+    team_flag = jnp.arange(n) < k             # shape (n,)
+    same_team = team_flag[:, None] == team_flag[None, :]  # shape (n, n)
+
+    # 只允许同阵营间、且在通信半径内传递信息
+    share_graph = comm_mask & same_team       # shape (n, n)
+
+    visible = dist < find_radius  # shape (n, n)，bool
+
+    # Step 6: 多跳传播（布尔图邻接传播）
+    def body_fn(state):
+        # visible[i, j] == True 表示 i 能看到 j
+        # share_graph[i, j] == True 表示 i 可以和 j 同阵营通信
+        visible, _ = state
+        new_visible = (share_graph @ visible) > 0
+        updated = visible | new_visible
+        return (updated, visible)
+
+    def cond_fn(state):
+        updated, prev = state
+        return jnp.any(updated != prev)
+
+    visible, _ = jax.lax.while_loop(cond_fn, body_fn, (visible, jnp.zeros_like(visible, dtype=jnp.bool_)))
+
+    return visible  # shape (n, n), bool

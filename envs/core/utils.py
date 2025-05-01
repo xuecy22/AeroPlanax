@@ -89,7 +89,7 @@ def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp
     
     # 计算夹角的cos值，如果夹角小于阈值且距离小于锁定距离，则认为被锁定
     angle_cos = dot_product / (distance + 1e-6)  # 防止除以零
-    angle_condition = jnp.abs(angle_cos) > jnp.cos(angle)
+    angle_condition = (angle_cos) > jnp.cos(angle)
     distance_condition = distance < R
     mask = angle_condition & distance_condition
     mask = jax.lax.select(agent_id < num_allies,
@@ -98,6 +98,7 @@ def check_locked(num_allies, state: BasePlaneState, agent_id, R=30000, angle=jnp
     alive = state.is_alive | state.is_locked
     mask = jnp.where(alive, mask, False)
     locked = jnp.any(mask)
+    # jax.debug.print("id:{id} mask:{mask} angle_cos:{angle_cos} lock:{locked}", id=agent_id,mask=mask,angle_cos=angle_cos,locked=locked)
     return locked
 
 def check_shotdown(state: BasePlaneState, agent_id):
@@ -131,5 +132,5 @@ def check_hit(plane_state: BasePlaneState, missile_state: BaseMissileState, agen
     return hit
 
 def update_blood(state: BasePlaneState, agent_id, dt):
-    # return state.blood[agent_id] - 20 * dt * state.is_locked[agent_id]
+    return state.blood[agent_id] - 1 * dt * state.is_locked[agent_id]
     return state.blood[agent_id]
