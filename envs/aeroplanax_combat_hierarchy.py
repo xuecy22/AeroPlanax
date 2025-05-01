@@ -355,6 +355,32 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         return HierarchicalCombatTaskParams()
 
     @functools.partial(jax.jit, static_argnums=(0,))
+    def get_termination(
+        self,
+        state: HierarchicalCombatTaskState,
+        params: HierarchicalCombatTaskParams,
+    ) -> Tuple[HierarchicalCombatTaskState, Dict[AgentName, bool]]:
+        dones = jnp.zeros(self.num_agents, dtype=jnp.bool_)
+        successes = jnp.zeros(self.num_agents, dtype=jnp.bool_)
+        for termination_condition in self.termination_conditions:
+            new_done, new_success = jax.vmap(
+                termination_condition, in_axes=(None, None, 0)
+            )(state, params, jnp.arange(self.num_agents))
+            dones = jnp.logical_or(dones, new_done)
+            successes = jnp.logical_or(successes, new_success)
+
+        # NOTE: 在combat任务中，我方胜利才视作胜利
+        state = state.replace(
+            done=jnp.all(dones),
+            success=jnp.any(jnp.where(jnp.arange(self.num_agents) < self.num_allies, successes, True))
+        )
+            
+        dones = {
+            agent: dones[i] for i, agent in enumerate(self.agents)
+        }
+        return state, dones
+
+    @functools.partial(jax.jit, static_argnums=(0,))
     def _init_state(
         self,
         key: jax.Array,
