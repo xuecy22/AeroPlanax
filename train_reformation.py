@@ -1,10 +1,9 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.5'
 
 import jax
 import wandb
-import chex
 import jax.numpy as jnp
 import flax.linen as nn
 import numpy as np
@@ -20,10 +19,7 @@ import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_formation import (
-    AeroPlanaxFormationEnv as Env,
-    FormationTaskParams as TaskParams
-)
+from envs.aeroplanax_reformation import AeroPlanaxFormationEnv, FormationTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -55,17 +51,17 @@ class ScannedRNN(nn.Module):
         return cell.initialize_carry(jax.random.PRNGKey(0), (batch_size, hidden_size))
 
 
-class ActorRNN(nn.Module):
+class ActorCriticRNN(nn.Module):
     action_dim: Sequence[int]
     config: Dict
 
     @nn.compact
     def __call__(self, hidden, x):
-        obs, dones = x
         if self.config["ACTIVATION"] == "relu":
             activation = nn.relu
         else:
             activation = nn.tanh
+        obs, dones = x
         embedding = nn.Dense(
             self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
         )(obs)
@@ -95,26 +91,6 @@ class ActorRNN(nn.Module):
         pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
         pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
 
-        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder)
-    
-class CriticRNN(nn.Module):
-    config: Dict
-    
-    @nn.compact
-    def __call__(self, hidden, x):
-        world_state, dones = x
-        if self.config["ACTIVATION"] == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-        embedding = nn.Dense(
-            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(world_state)
-        embedding = activation(embedding)
-        
-        rnn_in = (embedding, dones)
-        hidden, embedding = ScannedRNN()(hidden, rnn_in)
-        
         critic = nn.Dense(
             self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
         )(embedding)
@@ -123,7 +99,8 @@ class CriticRNN(nn.Module):
             critic
         )
 
-        return hidden, jnp.squeeze(critic, axis=-1)
+        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder), jnp.squeeze(critic, axis=-1)
+
 
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -132,13 +109,12 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
-    world_state: jnp.ndarray
-    valid_action: jnp.ndarray
     info: jnp.ndarray
 
 
 def batchify(x: dict, agent_list, num_envs, num_actors):
     x = jnp.stack([x[a] for a in agent_list])
+    # print('batchify', x.shape)
     return x.reshape((num_actors * num_envs, -1))
 
 
@@ -146,34 +122,48 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     x = x.reshape((num_actors, num_envs, -1))
     return {a: x[i] for i, a in enumerate(agent_list)}
 
-
-def unzip_discrete_action(rng: chex.PRNGKey, pi: Sequence[distrax.Categorical]) -> Tuple[chex.PRNGKey, jax.Array, jax.Array]:
-    pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
-
-    rng, throttle_rng, elevator_rng, aileron_rng, rudder_rng = jax.random.split(rng, 5)
-
-    action_throttle = pi_throttle.sample(seed=throttle_rng)
-    action_elevator = pi_elevator.sample(seed=elevator_rng)
-    action_aileron = pi_aileron.sample(seed=aileron_rng)
-    action_rudder = pi_rudder.sample(seed=rudder_rng)
-
-    log_prob_throttle = pi_throttle.log_prob(action_throttle)
-    log_prob_elevator = pi_elevator.log_prob(action_elevator)
-    log_prob_aileron = pi_aileron.log_prob(action_aileron)
-    log_prob_rudder = pi_rudder.log_prob(action_rudder)
-
-    log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
-
-    action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
-                              action_elevator[:, :, np.newaxis], 
-                              action_aileron[:, :, np.newaxis], 
-                              action_rudder[:, :, np.newaxis]], axis=-1)
-    
-    return rng, action, log_prob
-
-
-def init_network(env : LogWrapper, config : Dict[str, Any]):
-    rng = jax.random.PRNGKey(config["SEED"])
+def make_train(config):
+    env_params = FormationTaskParams()
+    env = AeroPlanaxFormationEnv(env_params)
+    env = LogWrapper(env)
+    config["NUM_ACTORS"] = env.num_agents
+    config["NUM_UPDATES"] = (
+        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
+    )
+    config["MINIBATCH_SIZE"] = (
+        config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
+    )
+    if "LOADDIR" in config:
+        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        rng = jax.random.PRNGKey(42)
+        init_x = (
+            jnp.zeros(
+                (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
+            ),
+            jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
+        )
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        network_params = network.init(rng, init_hstate, init_x)
+        if config["ANNEAL_LR"]:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(learning_rate=linear_schedule, eps=1e-5),
+            )
+        else:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(config["LR"], eps=1e-5),
+            )
+        train_state = TrainState.create(
+            apply_fn=network.apply,
+            params=network_params,
+            tx=tx,
+        )
+        state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
+        ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+        checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
+    else:
+        checkpoint = None
 
     def linear_schedule(count):
         frac = (
@@ -183,92 +173,45 @@ def init_network(env : LogWrapper, config : Dict[str, Any]):
         )
         return config["LR"] * frac
 
-    actor_network = ActorRNN(MAPPO_DISCRETE_DEFAULT_DIMS, config=config)
-    critic_network = CriticRNN(config=config)
-    rng, _rng_actor, _rng_critic = jax.random.split(rng, 3)
-
-    ac_init_x = (
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env._get_obs_size())),
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
-    )
-    ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-    actor_network_params = actor_network.init(_rng_actor, ac_init_hstate, ac_init_x)
-    
-    cr_init_x = (
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], env._get_global_obs_size())),
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
-    )
-    cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-    critic_network_params = critic_network.init(_rng_critic, cr_init_hstate, cr_init_x)
-    
-    if config["ANNEAL_LR"]:
-        tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(learning_rate=linear_schedule, eps=1e-5),
-        )
-    else:
-        tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(config["LR"], eps=1e-5),
-        )
-    ac_train_state = TrainState.create(
-        apply_fn=actor_network.apply,
-        params=actor_network_params,
-        tx=tx,
-    )
-    cr_train_state = TrainState.create(
-        apply_fn=critic_network.apply,
-        params=critic_network_params,
-        tx=tx,
-    )
-
-    if "LOADDIR" in config:
-        state = {
-            "actor_params": ac_train_state.params,
-            "actor_opt_state": ac_train_state.opt_state,
-            "critic_params": cr_train_state.params,
-            "critic_opt_state": cr_train_state.opt_state,
-            "epoch": jnp.array(0)
-        }
-        checkpoint = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler()).restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
-
-        actor_params, actor_opt_state = checkpoint["actor_params"], checkpoint["actor_opt_state"]
-        ac_train_state = ac_train_state.replace(params=actor_params, opt_state=actor_opt_state)
-
-        critic_params, critic_opt_state = checkpoint["critic_params"], checkpoint["critic_opt_state"]
-        cr_train_state = cr_train_state.replace(params=critic_params, opt_state=critic_opt_state)
-        
-        start_epoch = checkpoint["epoch"]
-    else:
-        start_epoch = 0
-
-    return (actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch
-
-
-def make_train(config):
-    env_params = TaskParams()
-    env = Env(env_params)
-    env = LogWrapper(env)
-    MAPPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
-    
-    config["NUM_ACTORS"] = env.num_agents
-    config["NUM_UPDATES"] = (
-        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
-    )
-    config["MINIBATCH_SIZE"] = (
-        config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    )
-
     def train(rng):
         # INIT NETWORK
-        (actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(env, config)
-
+        network = ActorCriticRNN([31, 41, 41, 41], config=config)
+        rng, _rng = jax.random.split(rng)
+        init_x = (
+            jnp.zeros(
+                (1, config["NUM_ENVS"] * config["NUM_ACTORS"], *env.observation_space(env.agents[0], env_params).shape)
+            ),
+            jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
+        )
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        network_params = network.init(_rng, init_hstate, init_x)
+        if config["ANNEAL_LR"]:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(learning_rate=linear_schedule, eps=1e-5),
+            )
+        else:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(config["LR"], eps=1e-5),
+            )
+        train_state = TrainState.create(
+            apply_fn=network.apply,
+            params=network_params,
+            tx=tx,
+        )
+        if checkpoint is not None:
+            params = checkpoint["params"]
+            opt_state = checkpoint["opt_state"]
+            train_state = train_state.replace(params=params, opt_state=opt_state)
+            start_epoch = checkpoint["epoch"]
+        else:
+            start_epoch = 0
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0))(reset_rng)
-        ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-        cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
 
         # INIT Tensorboard
         if config.get("DEBUG"):
@@ -280,22 +223,37 @@ def make_train(config):
             runner_state, update_steps = update_runner_state
 
             def _env_step(runner_state, unused):
-                train_states, env_state, last_obs, last_done, hstates, rng = runner_state
+                train_state, env_state, last_obs, last_done, hstate, rng = runner_state
 
                 # SELECT ACTION
                 ac_in = (
                     last_obs[np.newaxis, :],
                     last_done[np.newaxis, :],
                 )
-                ac_hstates, pi = actor_network.apply(train_states[0].params, hstates[0], ac_in)
-                
-                rng, action, log_prob = unzip_discrete_action(rng, pi)
+                hstate, pi, value = network.apply(train_state.params, hstate, ac_in)
 
-                cr_in = (
-                    last_obs[np.newaxis, :],
-                    last_done[np.newaxis, :],
-                )
-                cr_hstates, value = critic_network.apply(train_states[1].params, hstates[1], cr_in)
+                pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+
+                rng, _rng = jax.random.split(rng)
+                action_throttle = pi_throttle.sample(seed=_rng)
+                rng, _rng = jax.random.split(rng)
+                action_elevator = pi_elevator.sample(seed=_rng)
+                rng, _rng = jax.random.split(rng)
+                action_aileron = pi_aileron.sample(seed=_rng)
+                rng, _rng = jax.random.split(rng)
+                action_rudder = pi_rudder.sample(seed=_rng)
+                log_prob_throttle = pi_throttle.log_prob(action_throttle)
+                log_prob_elevator = pi_elevator.log_prob(action_elevator)
+                log_prob_aileron = pi_aileron.log_prob(action_aileron)
+                log_prob_rudder = pi_rudder.log_prob(action_rudder)
+
+                log_prob = log_prob_throttle + log_prob_elevator + log_prob_aileron + log_prob_rudder
+
+                action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
+                                          action_elevator[:, :, np.newaxis], 
+                                          action_aileron[:, :, np.newaxis], 
+                                          action_rudder[:, :, np.newaxis]], axis=-1)
+
                 value, action, log_prob = (
                     value.squeeze(0),
                     action.squeeze(0),
@@ -309,20 +267,13 @@ def make_train(config):
                     env.step, in_axes=(0, 0, 0)
                 )(rng_step, env_state, 
                   unbatchify(action, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]))
-
                 reward = batchify(reward, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
+                transition = Transition(
+                    last_done, action, value, reward, log_prob, last_obs, info
+                )
                 obsv = batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"])
                 done = batchify(done, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]).reshape(-1)
-                
-                transition = Transition(
-                    last_done, action, value, reward, log_prob, last_obs, last_obs, ~(last_done & done), info
-                )
-
-                mask = jnp.reshape(1.0 - done, (-1, 1))
-                ac_hstates = ac_hstates * mask
-                cr_hstates = cr_hstates * mask
-
-                runner_state = (train_states, env_state, obsv, done, (ac_hstates, cr_hstates), rng)
+                runner_state = (train_state, env_state, obsv, done, hstate, rng)
                 return runner_state, transition
 
             initial_hstate = runner_state[-2]
@@ -331,13 +282,12 @@ def make_train(config):
             )
 
             # CALCULATE ADVANTAGE
-            train_states, env_state, last_obs, last_done, hstates, rng = runner_state
-
-            cr_in = (
+            train_state, env_state, last_obs, last_done, hstate, rng = runner_state
+            ac_in = (
                 last_obs[np.newaxis, :],
                 last_done[np.newaxis, :],
             )
-            _, last_val = critic_network.apply(train_states[1].params, hstates[1], cr_in)
+            _, _, last_val = network.apply(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze(0)
 
             def _calculate_gae(traj_batch, last_val):
@@ -367,14 +317,13 @@ def make_train(config):
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
-                def _update_minbatch(train_states: Tuple[TrainState, TrainState], batch_info):
-                    actor_train_state, critic_train_state = train_states
-                    ac_init_hstate, cr_init_hstate, traj_batch, advantages, targets = batch_info
+                def _update_minbatch(train_state, batch_info):
+                    init_hstate, traj_batch, advantages, targets = batch_info
 
-                    def _actor_loss_fn(actor_params, init_hstate, traj_batch: Transition, gae):
+                    def _loss_fn(params, init_hstate, traj_batch, gae, targets):
                         # RERUN NETWORK
-                        _, pi = actor_network.apply(
-                            actor_params,
+                        _, pi, value = network.apply(
+                            params,
                             init_hstate.squeeze(0),
                             (traj_batch.obs, traj_batch.done),
                         )
@@ -383,8 +332,18 @@ def make_train(config):
                         log_prob += pi[2].log_prob(traj_batch.action[:, :, 2])
                         log_prob += pi[3].log_prob(traj_batch.action[:, :, 3])
 
+                        # CALCULATE VALUE LOSS
+                        value_pred_clipped = traj_batch.value + (
+                            value - traj_batch.value
+                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
+                        value_losses = jnp.square(value - targets)
+                        value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                        value_loss = 0.5 * jnp.maximum(
+                            value_losses, value_losses_clipped
+                        ).mean()
+
                         # CALCULATE ACTOR LOSS
-                        logratio = (log_prob - traj_batch.log_prob)
+                        logratio = log_prob - traj_batch.log_prob
                         ratio = jnp.exp(logratio)
                         gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor1 = ratio * gae
@@ -397,59 +356,30 @@ def make_train(config):
                             * gae
                         )
                         loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
-                        loss_actor = (loss_actor * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
+                        loss_actor = loss_actor.mean()
+                        entropy = pi[0].entropy().mean() + pi[1].entropy().mean() + pi[2].entropy().mean() + pi[3].entropy().mean()
 
-                        entropy = ((pi[0].entropy() + pi[1].entropy() + pi[2].entropy()+ pi[3].entropy()) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
-                        
                         # debug
-                        approx_kl = (((ratio - 1) - logratio) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
-                        clip_frac = ((jnp.abs(ratio - 1) > config["CLIP_EPS"]) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
-                        
-                        actor_loss = loss_actor - config["ENT_COEF"] * entropy
-                        
-                        return actor_loss, (loss_actor, entropy, ratio, approx_kl, clip_frac)
-                    
-                    def _critic_loss_fn(critic_params, init_hstate, traj_batch: Transition, targets):
-                        # RERUN NETWORK
-                        _, value = critic_network.apply(critic_params, init_hstate.squeeze(0), (traj_batch.world_state, traj_batch.done)) 
-                        
-                        # CALCULATE VALUE LOSS
-                        value_pred_clipped = traj_batch.value + (
-                            value - traj_batch.value
-                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
-                        value_losses = jnp.square(value - targets)
-                        value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                        value_loss = (0.5 * jnp.maximum(value_losses, value_losses_clipped) * traj_batch.valid_action).sum() / (traj_batch.valid_action.sum() + 1e-8)
-                        critic_loss = config["VF_COEF"] * value_loss
-                        return critic_loss, (value_loss)
+                        approx_kl = ((ratio - 1) - logratio).mean()
+                        clip_frac = jnp.mean(jnp.abs(ratio - 1) > config["CLIP_EPS"])
 
-                    actor_grad_fn = jax.value_and_grad(_actor_loss_fn, has_aux=True)
-                    actor_loss, actor_grads = actor_grad_fn(
-                        actor_train_state.params, ac_init_hstate, traj_batch, advantages
+                        total_loss = (
+                            loss_actor
+                            + config["VF_COEF"] * value_loss
+                            - config["ENT_COEF"] * entropy
+                        )
+                        return total_loss, (value_loss, loss_actor, entropy, ratio, approx_kl, clip_frac)
+
+                    grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
+                    total_loss, grads = grad_fn(
+                        train_state.params, init_hstate, traj_batch, advantages, targets
                     )
-                    critic_grad_fn = jax.value_and_grad(_critic_loss_fn, has_aux=True)
-                    critic_loss, critic_grads = critic_grad_fn(
-                        critic_train_state.params, cr_init_hstate, traj_batch, targets
-                    )
-                    
-                    actor_train_state = actor_train_state.apply_gradients(grads=actor_grads)
-                    critic_train_state = critic_train_state.apply_gradients(grads=critic_grads)
-                    
-                    total_loss = actor_loss[0] + critic_loss[0]
-                    loss_info = {
-                        "total_loss": total_loss,
-                        "actor_loss": actor_loss[0],
-                        "value_loss": critic_loss[0],
-                        "entropy": actor_loss[1][1],
-                        "ratio": actor_loss[1][2],
-                        "approx_kl": actor_loss[1][3],
-                        "clip_frac": actor_loss[1][4],
-                    }
-                    return (actor_train_state, critic_train_state), loss_info
+                    train_state = train_state.apply_gradients(grads=grads)
+                    return train_state, total_loss
 
                 (
-                    train_states,
-                    init_hstates,
+                    train_state,
+                    init_hstate,
                     traj_batch,
                     advantages,
                     targets,
@@ -458,8 +388,7 @@ def make_train(config):
                 rng, _rng = jax.random.split(rng)
 
                 batch = (
-                    init_hstates[0],
-                    init_hstates[1],
+                    init_hstate,
                     traj_batch,
                     advantages,
                     targets,
@@ -483,12 +412,12 @@ def make_train(config):
                     shuffled_batch,
                 )
 
-                train_states, total_loss = jax.lax.scan(
-                    _update_minbatch, train_states, minibatches
+                train_state, total_loss = jax.lax.scan(
+                    _update_minbatch, train_state, minibatches
                 )
                 update_state = (
-                    train_states,
-                    init_hstates,
+                    train_state,
+                    init_hstate,
                     traj_batch,
                     advantages,
                     targets,
@@ -497,9 +426,9 @@ def make_train(config):
                 return update_state, total_loss
 
             # adding an additional "fake" dimensionality to perform minibatching correctly
-            initial_hstate = (initial_hstate[0][None, :], initial_hstate[1][None, :])
+            initial_hstate = initial_hstate[None, :]
             update_state = (
-                train_states,
+                train_state,
                 initial_hstate,
                 traj_batch,
                 advantages,
@@ -509,48 +438,51 @@ def make_train(config):
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
-            train_states = update_state[0]
+            train_state = update_state[0]
             metric = traj_batch.info
-
-            loss_info["ratio_0"] = loss_info["ratio"].at[0,0].get()
+            ratio_0 = loss_info[1][3].at[0,0].get().mean()
             loss_info = jax.tree.map(lambda x: x.mean(), loss_info)
-            metric["loss"] = loss_info
-            
+            metric["loss"] = {
+                "total_loss": loss_info[0],
+                "value_loss": loss_info[1][0],
+                "actor_loss": loss_info[1][1],
+                "entropy": loss_info[1][2],
+                "ratio": loss_info[1][3],
+                "ratio_0": ratio_0,
+                "approx_kl": loss_info[1][4],
+                "clip_frac": loss_info[1][5],
+            }
+
             rng = update_state[-1]
             metric["update_steps"] = update_steps
-            update_steps = update_steps + 1 
-
             if config.get("DEBUG"):
                 def callback(metric):
                     env_steps = metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"]
                     for k, v in metric["loss"].items():
                         writer.add_scalar('loss/{}'.format(k), v, env_steps)
-
-                    # 压缩 agent 维度
-                    episode_mask = metric["returned_episode"].any(-1)  # (steps, envs)  .any(-1)表示在智能体维度上进行"或"操作，如果该环境实例中任何一个智能体完成了回合，结果就为True
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
-                    writer.add_scalar('eval/alive_count', metric["alive_count"][episode_mask].mean(), env_steps)
+                    writer.add_scalar('eval/alive_count', metric["alive_count"][metric["returned_episode"].any(-1)].mean(), env_steps)
                     print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f} AliveCount={:.3f}".format(
                         env_steps,
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
                         metric["success"][metric["returned_episode"]].mean(),
-                        metric["alive_count"][episode_mask].mean(),
+                        metric["alive_count"][metric["returned_episode"].any(-1)].mean(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
-
-            runner_state = (train_states, env_state, last_obs, last_done, hstates, rng)
+            update_steps = update_steps + 1    
+            runner_state = (train_state, env_state, last_obs, last_done, hstate, rng)
             return (runner_state, update_steps), metric
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
-            (ac_train_state, cr_train_state),
+            train_state,
             env_state,
             batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]),
             jnp.zeros((config["NUM_ENVS"] * config["NUM_ACTORS"]), dtype=bool),
-            (ac_init_hstate, cr_init_hstate),
+            init_hstate,
             _rng,
         )
         runner_state, metric = jax.lax.scan(
@@ -561,35 +493,13 @@ def make_train(config):
     return train
 
 
-def save_train(out: Dict[str, Any], save_dir: str):
-    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
-    checkpoint = {
-        "actor_params": out['runner_state'][0][0][0].params,
-        "actor_opt_state": out['runner_state'][0][0][0].opt_state,
-        "critic_params": out['runner_state'][0][0][1].params,
-        "critic_opt_state": out['runner_state'][0][0][1].opt_state,
-        "epoch": jnp.array(out['runner_state'][1])
-    }
-    checkpoint_path = os.path.abspath(os.path.join(save_dir, f"checkpoint_epoch_{out['runner_state'][1]}"))
-    ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
-    ckptr.wait_until_finished()
-
-    print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
-    return checkpoint_path
-
-
-# NOTE: 第一维（推力）的维度需要与env中的decode方式对应
-MAPPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
-env_params = TaskParams()
-env = Env(env_params)
-
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "reformation_seed42",
+    "GROUP": "formation",
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 300,
-    "NUM_ACTORS": env.num_agents,
+    "NUM_ACTORS": 5,
     "NUM_STEPS": 1000,
     "TOTAL_TIMESTEPS": 3e8,
     "FC_DIM_SIZE": 128,
@@ -611,33 +521,34 @@ config = {
     # "LOADDIR": "/home/xcy/AeroPlanax/results/2025-01-26-04-39/checkpoints/checkpoint_epoch_1" 
 }
 
-if config.get("WANDB", True):
-    wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
-    wandb.init(
-        project="AeroPlanax",
-        config=config,
-        name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{config["SEED"]}',
-        group=config['GROUP'],
-        notes='formation',
-        reinit=True,
-    )
+seed = config['SEED']
+wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
+wandb.init(
+    # set the wandb project where this run will be logged
+    project="AeroPlanax",
+    # track hyperparameters and run metadata
+    config=config,
+    name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
+    group=config['GROUP'],
+    notes='reformation',
+    # dir=config['LOGDIR'],
+    reinit=True,
+)
 
 output_dir = config["OUTPUTDIR"]
 Path(output_dir).mkdir(parents=True, exist_ok=True)
 save_dir = config["SAVEDIR"]
 Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-rng = jax.random.PRNGKey(config["SEED"])
+rng = jax.random.PRNGKey(seed)
 train_jit = jax.jit(make_train(config))
 out = train_jit(rng)
 wandb.finish()
 
 ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
 checkpoint = {
-    "actor_params": out['runner_state'][0][0][0].params,
-    "actor_opt_state": out['runner_state'][0][0][0].opt_state,
-    "critic_params": out['runner_state'][0][0][1].params,
-    "critic_opt_state": out['runner_state'][0][0][1].opt_state,
+    "params": out['runner_state'][0][0].params,
+    "opt_state": out['runner_state'][0][0].opt_state,
     "epoch": jnp.array(out['runner_state'][1])
 }
 checkpoint_path = os.path.abspath(os.path.join(config["SAVEDIR"], f"checkpoint_epoch_{out['runner_state'][1]}"))

@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from .base_dataclass import BasePlaneState, BaseMissileState
 
 
-def check_collision(state: BasePlaneState, agent_id, R=50):
+def check_collision(state: BasePlaneState, agent_id, R=20):
     alive = state.is_alive | state.is_locked
     cur_pos = jnp.hstack((state.north[agent_id], state.east[agent_id], state.altitude[agent_id]))
     cur_pos = cur_pos.reshape(-1, 1)
@@ -13,6 +13,7 @@ def check_collision(state: BasePlaneState, agent_id, R=50):
     distance = distance.at[agent_id].set(jnp.finfo(jnp.float32).max)
     distance = jnp.where(alive, distance, jnp.finfo(jnp.float32).max)
     done = jnp.any(distance < R)
+    # jax.debug.callback(lambda x: print("Collision is", x), done)
     return done
 
 # def check_extreme_state(state: BasePlaneState, agent_id, min_alpha=-20, max_alpha=45, min_beta=-5.0, max_beta=5.0):
@@ -130,4 +131,5 @@ def check_hit(plane_state: BasePlaneState, missile_state: BaseMissileState, agen
     return hit
 
 def update_blood(state: BasePlaneState, agent_id, dt):
-    return state.blood[agent_id] - 20 * dt * state.is_locked[agent_id]
+    # return state.blood[agent_id] - 20 * dt * state.is_locked[agent_id]
+    return state.blood[agent_id]

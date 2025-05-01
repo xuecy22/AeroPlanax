@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from flax import struct
 import jax
+from jax.typing import ArrayLike
 from jax import lax
 import jax.numpy as jnp
 from gymnax.environments import environment
@@ -21,6 +22,7 @@ class EnvState:
     missile_state: BaseMissileState
     control_state: BaseControlState
     # task state
+    pre_rewards: ArrayLike
     done: bool
     success: bool
     time: int
@@ -74,6 +76,8 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self.agent_interaction_steps = env_params.agent_interaction_steps
 
         self.reward_functions: List[Callable[[TEnvState, TEnvParams, AgentID], float]] = []
+        self.is_potential: List[bool] = []
+
         self.termination_conditions: List[Callable[[TEnvState, TEnvParams, AgentID], Tuple[bool, bool]]] = []
 
         self.create_records = False
@@ -160,6 +164,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         init_state = self._init_state(key, params)
         state = self._reset_task(key, init_state, params)
         obs = self._get_obs(state, params)
+        state, _ = self.get_reward(state, params)
         return obs, state
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -291,7 +296,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
 
         state_st, dones = self.get_termination(state_st, params)
         dones["__all__"] = state_st.done
-        rewards = self.get_reward(state_st, params)
+        state_st, rewards = self.get_reward(state_st, params)
         info = {"success": state_st.success}
 
         key, key_step = jax.random.split(key)
@@ -342,6 +347,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             plane_state=aeroplane_state,
             missile_state=missile_state,
             control_state=aeroplane_control_state,
+            pre_rewards=jnp.zeros((len(self.reward_functions), self.num_agents)),
             done=False,
             success=False,
             time=0
@@ -445,7 +451,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self,
         state: TEnvState,
         params: TEnvParams,
-    ) -> Dict[AgentName, float]:
+    ) -> Tuple[TEnvState, Dict[AgentName, float]]:
         """
         Aggregate reward functions.
 
@@ -457,14 +463,20 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             Dict[AgentName, float]: agents' rewards.
         """
         rewards = jnp.zeros(self.num_agents)
-        for reward_function in self.reward_functions:
-            rewards += jax.vmap(
+        pre_rewards = jnp.zeros_like(state.pre_rewards)
+        for i in range(len(self.reward_functions)):
+            reward_function = self.reward_functions[i]
+            reward = jax.vmap(
                 reward_function, in_axes=(None, None, 0)
             )(state, params, jnp.arange(self.num_agents))
+            if self.is_potential[i]:
+                reward, pre_rewards = reward - state.pre_rewards[i], pre_rewards.at[i].set(reward)
+            rewards += reward
         rewards = {
             agent: rewards[i] for i, agent in enumerate(self.agents)
         }
-        return rewards
+        state = state.replace(pre_rewards=pre_rewards)
+        return state, rewards
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def get_termination(
