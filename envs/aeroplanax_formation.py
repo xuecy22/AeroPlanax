@@ -2,6 +2,8 @@
 在formation任务中
 考虑飞机碰撞会优先碰撞距离最近的飞机
 因此对于对队友机的obs只需考虑最近的一个
+
+from branch: dev-tmp0429_lxy_reform
 '''
 from typing import Dict, Optional, Tuple, Any
 from jax import Array
@@ -205,7 +207,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
             functools.partial(crash_reward_fn, reward=-1000),
             functools.partial(event_driven_reward_fn, success_reward=200),
         ]
-        self.is_potential = [False, False]
+        self.is_potential = [False, False, False]
 
         self.termination_conditions = [
             crashed_fn,

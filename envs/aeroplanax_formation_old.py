@@ -3,7 +3,7 @@
 考虑飞机碰撞会优先碰撞距离最近的飞机
 因此对于对队友机的obs只需考虑最近的一个
 
-适配以老式方式进行训练，自带reward，应当可以直接复制进dev-heading分支并运行
+from branch: dev-lxy_mulcombat
 '''
 from typing import Dict, Optional, Tuple, Any
 from jax import Array
