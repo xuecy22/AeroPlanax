@@ -527,16 +527,16 @@ def make_train(config):
                         writer.add_scalar('loss/{}'.format(k), v, env_steps)
 
                     # 压缩 agent 维度
-                    episode_mask = metric["returned_episode"].any(-1)  # (steps, envs)
-                    writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][episode_mask].mean(), env_steps)
-                    writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][episode_mask].mean(), env_steps)
-                    writer.add_scalar('eval/success_rate', metric["success"][episode_mask].mean(), env_steps)
+                    episode_mask = metric["returned_episode"].any(-1)  # (steps, envs)  .any(-1)表示在智能体维度上进行"或"操作，如果该环境实例中任何一个智能体完成了回合，结果就为True
+                    writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
+                    writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
+                    writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/alive_count', metric["alive_count"][episode_mask].mean(), env_steps)
                     print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f} AliveCount={:.3f}".format(
                         env_steps,
-                        metric["returned_episode_lengths"][episode_mask].mean(),
-                        metric["returned_episode_returns"][episode_mask].mean(),
-                        metric["success"][episode_mask].mean(),
+                        metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
+                        metric["returned_episode_returns"][metric["returned_episode"]].mean(),
+                        metric["success"][metric["returned_episode"]].mean(),
                         metric["alive_count"][episode_mask].mean(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
@@ -585,8 +585,8 @@ env = Env(env_params)
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "reformation_seed10",
-    "SEED": 10,
+    "GROUP": "reformation_seed42",
+    "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 300,
     "NUM_ACTORS": env.num_agents,
