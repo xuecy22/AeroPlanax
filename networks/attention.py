@@ -1,5 +1,7 @@
 '''
-TODO: unchecked
+TODO: 
+unchecked
+unused
 '''
 from flax import linen as nn
 import jax.numpy as jnp
@@ -55,21 +57,71 @@ class DronePairEncoder(nn.Module):
         # 拼接编码后的离散和连续特征
         return jnp.concatenate([dense_encoded, embed], axis=-1)   # [B, N, embed_dim + 8]
 
+
+class CrossAttentionEncoder(nn.Module):
+    embed_dim: int = 64
+    num_heads: int = 4
+
+    @nn.compact
+    def __call__(self, ego_obs: jnp.ndarray, other_obs: jnp.ndarray, mask: jnp.ndarray = None):
+        """
+        ego_obs: [B, ego_dim]
+        other_obs: [B, N, obs_dim]
+        mask: [B, N]  -> 1: valid, 0: masked
+
+        Returns:
+            [B, embed_dim + ego_dim] encoded obs
+        """
+
+        # 1. Project inputs
+        q = ego_obs[:, None, :]                                # [B, 1, D_ego]
+        kv = other_obs                                         # [B, N, D_other]
+
+        # 2. Multi-head attention (flax will handle projection)
+        attn = nn.MultiHeadDotProductAttention(
+            num_heads=self.num_heads,
+            qkv_features=self.embed_dim,
+            out_features=self.embed_dim,
+            dropout_rate=0.0,
+            deterministic=True,
+            kernel_init=nn.initializers.xavier_uniform()
+        )(inputs_q=q, inputs_k=kv, inputs_v=kv, mask=mask[:, None, :] if mask is not None else None)  # [B, 1, D]
+
+        attn = attn.squeeze(axis=1)  # [B, D]
+
+        # 3. Concatenate with ego obs
+        out = jnp.concatenate([ego_obs, attn], axis=-1)  # [B, embed_dim + ego_dim]
+        return out
+    
+
+
 import jax
 import jax.numpy as jnp
 
-if __name__=='__main__':
-    # 假设每个 agent 的状态维度是 30
-    batch_size = 32
-    num_agents = 50
-    state_dim = 30
 
-    dummy_input = jnp.ones((batch_size, num_agents, state_dim))
+def main():
+    # 模拟环境配置
+    batch_size = 4
+    num_others = 5
+    ego_dim = 6
+    obs_dim = 8
 
-    # 初始化模型
-    model = AttentionCritic(embed_dim=128, num_heads=4, ff_dim=256)
-    params = model.init(jax.random.PRNGKey(0), dummy_input)
+    # 随机 key
+    key = jax.random.PRNGKey(42)
 
-    # 前向推理
-    value = model.apply(params, dummy_input)
-    print(value.shape)  # (32, 1)
+    # 生成虚拟观测数据
+    ego_obs = jax.random.normal(key, (batch_size, ego_dim))
+    other_obs = jax.random.normal(key, (batch_size, num_others, obs_dim))
+    mask = jnp.ones((batch_size, num_others))  # 全部有效
+
+    # 实例化模型
+    model = CrossAttentionEncoder(embed_dim=64, num_heads=4)
+    variables = model.init(key, ego_obs, other_obs, mask)
+    encoded = model.apply(variables, ego_obs, other_obs, mask)
+
+    # 输出结果
+    print("Encoded shape:", encoded.shape)
+    print("Sample encoded output:\n", encoded)
+
+if __name__ == "__main__":
+    main()

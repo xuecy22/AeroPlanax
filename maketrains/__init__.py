@@ -4,7 +4,7 @@
 '''
 
 from maketrains.mappo_discrete import (
-    make_train as make_train_mappo_discrete,
+    # make_train as make_train_mappo_discrete,
     save_train as save_train_mappo
 )
 
@@ -12,13 +12,7 @@ from maketrains.ppo_discrete import (
     make_train as make_train_ppo_discrete,
 )
 
-from maketrains.ppo_discrete_raw import (
-    make_train as make_train_ppo,
-    save_train as save_train_ppo
-)
-
 from maketrains.configs import (
-    MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,
     HUGE_CONFIG

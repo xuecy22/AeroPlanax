@@ -28,7 +28,7 @@ import jax.experimental
 
 from envs.wrappers import JaxMARLWrapper, LogEnvState
 from envs.aeroplanax import AeroPlanaxEnv, EnvState
-from envs.aeroplanax_formation_old import (
+from envs.aeroplanax_formation import (
     AeroPlanaxFormationEnv as Env,
     FormationTaskParams as TaskParams
 )

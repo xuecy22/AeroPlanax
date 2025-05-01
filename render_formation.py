@@ -8,7 +8,7 @@ from jax.typing import ArrayLike
 import jax.numpy as jnp
 import numpy as np
 from typing import Sequence, NamedTuple, Any, Dict
-from envs.wrappers_mul import LogWrapper
+from envs.wrappers import LogWrapper
 from envs.aeroplanax_formation import AeroPlanaxFormationEnv, FormationTaskParams, FormationTaskState
 
 from networks import (

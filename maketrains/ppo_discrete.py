@@ -320,10 +320,10 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                         ckptr.wait_until_finished()
                         print(f"Checkpoint saved at epoch {current_epochs}")
                     
-                jax.experimental.io_callback(save_model_callback, 
-                                            None, 
-                                            (train_states, update_steps), 
-                                            ordered=True)
+                # jax.experimental.io_callback(save_model_callback, 
+                #                             None, 
+                #                             (train_states, update_steps), 
+                #                             ordered=True)
 
             
             metric["update_steps"] = update_steps

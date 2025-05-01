@@ -19,7 +19,7 @@ import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
+from envs.aeroplanax_combat_hierarchy import AeroPlanaxHierarchicalCombatEnv, HierarchicalCombatTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -123,8 +123,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env_params = CombatTaskParams()
-    env = AeroPlanaxCombatEnv(env_params)
+    env_params = HierarchicalCombatTaskParams()
+    env = AeroPlanaxHierarchicalCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config['NUM_ALLIES'] = env.num_allies

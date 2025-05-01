@@ -1,91 +1,126 @@
 import jax
 import optax
-import distrax
-import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
 import orbax.checkpoint as ocp
 from typing import Sequence, Dict, Tuple, List, Any
-from flax.linen.initializers import constant, orthogonal
 
 from flax.training.train_state import TrainState
 from networks.scannedRNN import ScannedRNN
 
+class MLP_Pooling_Encoder(nn.Module):
+    embed_dim: int = 128
+    hidden_dim: int = 128
+
+    @nn.compact
+    def __call__(self, ego_obs: jnp.ndarray, other_obs: jnp.ndarray):
+        """
+        ego_obs: [B, ego_dim]
+        other_obs: [B, N, obs_dim]
+        mask: [B, N]  -> 1: valid, 0: masked
+
+        Returns:
+            [B, embed_dim + ego_dim] encoded obs
+        """
+        # 1. Process each other agent's observation via MLP
+        other_h = nn.Dense(self.hidden_dim)(other_obs)  # [B, N, hidden_dim]
+
+        other_h = nn.relu(other_h)
+
+        pooled = jnp.mean(other_h, axis=1)  # [B, hidden_dim]
+
+        combined = jnp.concatenate([ego_obs, pooled], axis=-1)  # [B, ego_dim + hidden_dim]
+
+        output = nn.Dense(self.embed_dim)(combined)  # [B, embed_dim + ego_dim]
+        
+        return output
+    
+
 MAPPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
 
-class ActorRNN(nn.Module):
+from networks.mappoRNN_discrete import (
+    ActorRNN as MAPPOActorDiscrete,
+    CriticRNN as MAPPOCritic,
+)
+
+from networks.ppoRNN_discrete import (
+    ActorCriticRNN as PPOActorCriticDiscrete,
+)
+
+class ActorCriticRNN(nn.Module):
     action_dim: Sequence[int]
     config: Dict
 
     @nn.compact
     def __call__(self, hidden, x):
         obs, dones = x
-        if self.config["ACTIVATION"] == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-        embedding = nn.Dense(
-            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(obs)
-        embedding = activation(embedding)
 
-        rnn_in = (embedding, dones)
-        hidden, embedding = ScannedRNN()(hidden, rnn_in)
+        ego_obs = obs[:, :self.config["EGO_OBS_DIM"]]
+        other_obs = obs[:, self.config["EGO_OBS_DIM"]:].reshape(obs.shape[0], -1, self.config["OTHER_OBS_DIM"])
+        
+        pooling = MLP_Pooling_Encoder(
+            embed_dim=self.config["FC_DIM_SIZE"],
+            hidden_dim=self.config["FC_DIM_SIZE"],
+        )
+        feature = pooling(ego_obs, other_obs)
 
+        actor_critic = PPOActorCriticDiscrete(
+            action_dim=self.action_dim,
+            config=self.config,
+        )
+        return actor_critic(hidden, (feature, dones))
 
-        actor_mean = nn.Dense(
-            self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
-        )(embedding)
-        actor_mean = activation(actor_mean)
-        actor_throttle_mean = nn.Dense(
-            self.action_dim[0], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        actor_elevator_mean = nn.Dense(
-            self.action_dim[1], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        actor_aileron_mean = nn.Dense(
-            self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        actor_rudder_mean = nn.Dense(
-            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
-        pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
-        pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
-        pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
-
-        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder)
-    
-class CriticRNN(nn.Module):
+class ActorRNN(nn.Module):
+    action_dim: Sequence[int]
     config: Dict
     
     @nn.compact
     def __call__(self, hidden, x):
-        world_state, dones = x
-        if self.config["ACTIVATION"] == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-        embedding = nn.Dense(
-            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(world_state)
-        embedding = activation(embedding)
+        obs, dones = x
+
+        ego_obs = obs[:, :self.config["EGO_OBS_DIM"]]
+        other_obs = obs[:, self.config["EGO_OBS_DIM"]:].reshape(obs.shape[0], -1, self.config["OTHER_OBS_DIM"])
         
-        rnn_in = (embedding, dones)
-        hidden, embedding = ScannedRNN()(hidden, rnn_in)
-        
-        critic = nn.Dense(
-            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
-        )(embedding)
-        critic = activation(critic)
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
-            critic
+        pooling = MLP_Pooling_Encoder(
+            embed_dim=self.config["FC_DIM_SIZE"],
+            hidden_dim=self.config["FC_DIM_SIZE"],
         )
+        feature = pooling(ego_obs, other_obs)
+        
+        actor = MAPPOActorDiscrete(
+            action_dim=self.action_dim,
+            config=self.config,
+        )
+        return actor(hidden, (feature, dones))
 
-        return hidden, jnp.squeeze(critic, axis=-1)
+class CriticRNN(nn.Module):
+    action_dim: Sequence[int]
+    config: Dict
     
+    @nn.compact
+    def __call__(self, hidden, x):
+        obs, dones = x
 
-def init_network(obs_size : int, global_obs_size : int, config : Dict[str, Any], discrete_action_dims : List[int] = MAPPO_DISCRETE_DEFAULT_DIMS) -> Tuple[Tuple[nn.Module, nn.Module], Tuple[TrainState, TrainState], int]:
+        ego_obs = obs[:, :self.config["EGO_OBS_DIM"]]
+        other_obs = obs[:, self.config["EGO_OBS_DIM"]:].reshape(obs.shape[0], -1, self.config["OTHER_OBS_DIM"])
+        
+        pooling = MLP_Pooling_Encoder(
+            embed_dim=self.config["FC_DIM_SIZE"],
+            hidden_dim=self.config["FC_DIM_SIZE"],
+        )
+        feature = pooling(ego_obs, other_obs)
+
+        critic = MAPPOCritic(config=self.config)
+        return critic(hidden, (feature, dones))
+
+
+
+def init_network(
+        obs_size : int,
+        global_obs_size : int,
+        config : Dict[str, Any],
+        discrete_action_dims : List[int] = MAPPO_DISCRETE_DEFAULT_DIMS
+    ) -> Tuple[Tuple[nn.Module, nn.Module], Tuple[TrainState, TrainState], int]:
     rng = jax.random.PRNGKey(42)
 
     def linear_schedule(count):

@@ -10,20 +10,24 @@ import jax.numpy as jnp
 from pathlib import Path
 from datetime import datetime
 from envs.wrappers_mul import LogWrapper
-from envs.aeroplanax_formation import (
-    AeroPlanaxFormationEnv as Env,
-    FormationTaskParams as TaskParams
+# from envs.aeroplanax_formation import (
+#     AeroPlanaxFormationEnv as Env,
+#     FormationTaskParams as TaskParams
+# )
+from envs.aeroplanax_combat_hierarchy import (
+    AeroPlanaxHierarchicalCombatEnv as Env,
+    HierarchicalCombatTaskParams as TaskParams
 )
 
 from maketrains import (
     make_train_ppo_discrete as make_train,
     save_train_mappo as save_train,
-    MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,
 )
 from networks import (
     init_network_mappoRNN_discrete as init_network,
+    init_network_poolppo_discrete as init_network_poolppo,
 )
 
 env_params = TaskParams()
@@ -33,6 +37,8 @@ env = Env(env_params)
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
     "SEED": 42,
+    "EGO_OBS_DIM": env.own_features,
+    "OTHER_OBS_DIM": env.unit_features,
     "NUM_ACTORS": env.num_agents,
     "GROUP": "formation",
     "OUTPUTDIR": "results/" + str_date_time,
@@ -40,10 +46,10 @@ config = {
     "SAVEDIR": "results/" + str_date_time + "/checkpoints",
     "FOR_LOOP_EPOCHS": 50,
     "WANDB": False,
-    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
+    # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
 }
 # config = config | MINI_CONFIG
-config = config | MEDIUM_CONFIG
+config = config | MINI_CONFIG
 config["NUM_UPDATES"] = (
     config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
 )
@@ -65,8 +71,8 @@ Path(config["SAVEDIR"]).mkdir(parents=True, exist_ok=True)
 rng = jax.random.PRNGKey(config["SEED"])
 
 # INIT NETWORK
+(actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(env._get_obs_size(), env._get_obs_size(), config)
 env = LogWrapper(env)
-(actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(env, config)
 
 train_jit = jax.jit(make_train(config, env, (actor_network, critic_network),train_mode=True))
 
