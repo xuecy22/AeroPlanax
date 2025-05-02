@@ -15,6 +15,7 @@ from networks.pooling_encoder import (
 from networks.ppoRNN_discrete import (
     ActorCriticRNN as PPOActorCriticDiscrete,
     PPO_DISCRETE_DEFAULT_DIMS,
+    init_network as init_network_ppoRNN_discrete,
 )
 
 from networks.scannedRNN import ScannedRNN

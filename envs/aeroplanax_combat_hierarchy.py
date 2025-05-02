@@ -204,7 +204,7 @@ class HierarchicalCombatTaskParams(EnvParams):
     action_type: int = 1
     observation_type: int = 0 # 0: unit_list, 1: conic
     unit_features: int = 6
-    own_features: int = 9
+    own_features: int = 5
     formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
     max_steps: int = 100
     sim_freq: int = 50
@@ -372,7 +372,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         # NOTE: 在combat任务中，我方胜利才视作胜利
         state = state.replace(
             done=jnp.all(dones[:self.num_allies]) | jnp.all(dones[self.num_allies:]),
-            success=jnp.any(jnp.where(jnp.arange(self.num_agents) < self.num_allies, successes, True))
+            success=jnp.all(jnp.where(jnp.arange(self.num_agents) < self.num_allies, successes, True))
         )
             
         dones = {
@@ -469,16 +469,11 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_own_features(self, state: HierarchicalCombatTaskState, i: int):
         altitude = state.plane_state.altitude[i]
-        roll, pitch = state.plane_state.roll[i], state.plane_state.pitch[i]
         vel_x, vel_y, vel_z, vt = state.plane_state.vel_x[i], state.plane_state.vel_y[i], state.plane_state.vel_z[i], state.plane_state.vt[i]
         norm_altitude = altitude / 5000
-        roll_sin = jnp.sin(roll)
-        roll_cos = jnp.cos(roll)
-        pitch_sin = jnp.sin(pitch)
-        pitch_cos = jnp.cos(pitch)
         norm_vel_x, norm_vel_y, norm_vel_z, norm_vt = vel_x / 340, vel_y / 340, vel_z / 340, vt / 340
         empty_features = jnp.zeros(shape=(self.own_features,))
-        features = jnp.hstack((norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vel_x, norm_vel_y, norm_vel_z, norm_vt))
+        features = jnp.hstack((norm_altitude, norm_vel_x, norm_vel_y, norm_vel_z, norm_vt))
         return jax.lax.cond(
             state.plane_state.is_alive[i], lambda: features, lambda: empty_features
         )

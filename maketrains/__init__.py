@@ -12,8 +12,7 @@ from maketrains.ppo_discrete import (
     make_train as make_train_ppo_discrete,
 )
 
-from maketrains.configs import (
-    MINI_CONFIG,
-    MEDIUM_CONFIG,
-    HUGE_CONFIG
+from maketrains.ppo_discrete_union import (
+    make_train_union_vsbaseline as make_train_ppo_discrete_union_vsbaseline,
 )
+from maketrains.configs import *

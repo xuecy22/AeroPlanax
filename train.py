@@ -20,14 +20,17 @@ from envs.aeroplanax_combat_hierarchy import (
 )
 
 from maketrains import (
-    make_train_ppo_discrete as make_train,
+    # make_train_ppo_discrete as make_train,
+    make_train_ppo_discrete_union_vsbaseline as make_train,
     save_train_mappo as save_train,
+    MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,
 )
 from networks import (
     init_network_mappoRNN_discrete as init_network,
     init_network_poolppo_discrete as init_network_poolppo,
+    init_network_ppoRNN_discrete as init_network_ppo,
 )
 
 env_params = TaskParams()
@@ -40,6 +43,7 @@ config = {
     "EGO_OBS_DIM": env.own_features,
     "OTHER_OBS_DIM": env.unit_features,
     "NUM_ACTORS": env.num_agents,
+    "NUM_VALID_AGENTS": env.num_allies,
     "GROUP": "formation",
     "OUTPUTDIR": "results/" + str_date_time,
     "LOGDIR": "results/" + str_date_time + "/logs",
@@ -49,7 +53,7 @@ config = {
     # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
 }
 # config = config | MINI_CONFIG
-config = config | MINI_CONFIG
+config = config | MICRO_CONFIG
 config["NUM_UPDATES"] = (
     config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
 )
@@ -71,7 +75,7 @@ Path(config["SAVEDIR"]).mkdir(parents=True, exist_ok=True)
 rng = jax.random.PRNGKey(config["SEED"])
 
 # INIT NETWORK
-(actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(env._get_obs_size(), env._get_obs_size(), config)
+(actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network_ppo(env._get_obs_size(), env._get_obs_size(), config)
 env = LogWrapper(env)
 
 train_jit = jax.jit(make_train(config, env, (actor_network, critic_network),train_mode=True))

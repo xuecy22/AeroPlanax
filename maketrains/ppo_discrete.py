@@ -281,7 +281,10 @@ def make_train(config, env : LogWrapper, networks : Tuple[nn.Module,nn.Module], 
                     return update_state, total_loss
 
                 # adding an additional "fake" dimensionality to perform minibatching correctly
-                initial_hstate = (initial_hstate[0][None, :], initial_hstate[1][None, :])
+                initial_hstate = jax.tree_util.tree_map(
+                    lambda x: x[None, :],
+                    initial_hstate,
+                )
                 update_state = (
                     train_states,
                     initial_hstate,
