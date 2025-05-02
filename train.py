@@ -1,6 +1,6 @@
 import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '7'
+# os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.4'
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 import jax
@@ -22,7 +22,8 @@ from envs.aeroplanax_combat_hierarchy import (
 from maketrains import (
     # make_train_ppo_discrete as make_train,
     make_train_ppo_discrete_union_vsbaseline as make_train,
-    save_train_mappo as save_train,
+    # save_train_mappo as save_train,
+    save_train_ppo_discrete_union_vsbaseline as save_train,
     MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,

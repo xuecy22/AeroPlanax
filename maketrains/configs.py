@@ -28,7 +28,7 @@ BASE_CONFIG = {
 _MICRO_CONFIG = {
     "NUM_ENVS": 10,
     "NUM_STEPS": 200,
-    "TOTAL_TIMESTEPS": 1e5,
+    "TOTAL_TIMESTEPS": 1e4,
 }
 
 

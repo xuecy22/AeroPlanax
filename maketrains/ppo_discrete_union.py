@@ -164,7 +164,7 @@ def make_train_union_vsbaseline(config, env : LogWrapper, networks : Tuple[nn.Mo
                 # UPDATE NETWORK
                 def _update_epoch(update_state, unused):
                     def _update_minbatch(train_states: Tuple[TrainState,], batch_info):
-                        (network_train_state,) = train_states
+                        (network_train_state, _) = train_states
                         (network_init_hstate,), traj_batch, advantages, targets = batch_info
 
 
@@ -232,7 +232,7 @@ def make_train_union_vsbaseline(config, env : LogWrapper, networks : Tuple[nn.Mo
                             "approx_kl": total_loss[1][4],
                             "clip_frac": total_loss[1][5],
                         }
-                        return (network_train_state,), loss_info
+                        return (network_train_state, None), loss_info
 
                     (
                         train_states,
@@ -359,7 +359,7 @@ def make_train_union_vsbaseline(config, env : LogWrapper, networks : Tuple[nn.Mo
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
-            (network_train_state,),
+            (network_train_state, None),
             env_state,
             init_last_obs,
             init_last_done,
@@ -492,7 +492,7 @@ def make_train_union(config, env : LogWrapper, networks : Tuple[nn.Module, None]
                 # UPDATE NETWORK
                 def _update_epoch(update_state, unused):
                     def _update_minbatch(train_states: Tuple[TrainState,], batch_info):
-                        (network_train_state,) = train_states
+                        (network_train_state,_) = train_states
                         (network_init_hstate,), traj_batch, advantages, targets = batch_info
 
 
@@ -687,7 +687,7 @@ def make_train_union(config, env : LogWrapper, networks : Tuple[nn.Module, None]
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
-            (network_train_state,),
+            (network_train_state, None),
             env_state,
             batchify(obsv, env.agents, config["NUM_ENVS"], config["NUM_ACTORS"]),
             jnp.zeros((config["NUM_ENVS"] * config["NUM_ACTORS"]), dtype=bool),
@@ -703,3 +703,17 @@ def make_train_union(config, env : LogWrapper, networks : Tuple[nn.Module, None]
 
     return train
 
+
+def save_train(out: Dict[str, Any], save_dir: str):
+    ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+    checkpoint = {
+        "params": out['runner_state'][0][0][0].params,
+        "opt_state": out['runner_state'][0][0][0].opt_state,
+        "epoch": jnp.array(out['runner_state'][1])
+    }
+    checkpoint_path = os.path.abspath(os.path.join(save_dir, f"checkpoint_epoch_{out['runner_state'][1]}"))
+    ckptr.save(checkpoint_path, args=ocp.args.StandardSave(checkpoint))
+    ckptr.wait_until_finished()
+
+    print(f"Checkpoint saved at epoch {out['runner_state'][1]}")
+    return checkpoint_path

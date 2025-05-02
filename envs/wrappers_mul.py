@@ -53,10 +53,10 @@ class LogWrapper(JaxMARLWrapper):
         obs, env_state = self._env.reset(key)
         state = LogEnvState(
             env_state,
-            jnp.zeros((self._env.num_agents,)),
-            jnp.zeros((self._env.num_agents,)),
-            jnp.zeros((self._env.num_agents,)),
-            jnp.zeros((self._env.num_agents,)),
+            jnp.zeros((self._env.num_allies,)),
+            0,
+            jnp.zeros((self._env.num_allies,)),
+            0,
         )
         return obs, state
     
@@ -91,7 +91,7 @@ class LogWrapper(JaxMARLWrapper):
         ep_done = done["__all__"]
 
         # 更新累积奖励和回合长度
-        new_episode_return = state.episode_returns + self._batchify_floats(reward).reshape(-1)
+        new_episode_return = state.episode_returns + self._batchify_floats(reward).reshape(-1)[:self._env.num_allies]
         new_episode_length = state.episode_lengths + 1
 
         # 更新状态

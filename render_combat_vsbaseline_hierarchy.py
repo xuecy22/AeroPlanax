@@ -116,6 +116,15 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     x = x.reshape((num_actors, num_envs, -1))
     return {a: x[i] for i, a in enumerate(agent_list)}
 
+
+
+from networks import (
+    init_network_ppoRNN_discrete,
+    init_network_mappoRNN_discrete,
+    ScannedRNN,
+    unzip_discrete_action
+)
+
 def test(config, rng):
     def linear_schedule(count):
         frac = (
@@ -133,33 +142,8 @@ def test(config, rng):
     config['NUM_ENEMIES'] = env.num_enemies
     rng = jax.random.PRNGKey(config['SEED'])
 
-    # init model
-    network = ActorCriticRNN([3, 5, 3], config=config)
-    rng, _rng = jax.random.split(rng)
-    init_x = (
-        jnp.zeros(
-            (1, config["NUM_ENVS"] * config["NUM_ALLIES"], *env.observation_space(env.agents[0], env_params).shape)
-        ),
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ALLIES"])),
-    )
-    init_hstate = ScannedRNN.initialize_carry(config["NUM_ALLIES"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
-    network_params = network.init(_rng, init_hstate, init_x)
-    
-    if config["ANNEAL_LR"]:
-        tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(learning_rate=linear_schedule, eps=1e-5),
-        )
-    else:
-        tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(config["LR"], eps=1e-5),
-        )
-    train_state = TrainState.create(
-        apply_fn=network.apply,
-        params=network_params,
-        tx=tx,
-    )
+    (network,_),(train_state,_),(_,_) = init_network_ppoRNN_discrete(env._get_obs_size(),env._get_obs_size(), config)
+
     if "LOADDIR" in config:
         state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
         ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())

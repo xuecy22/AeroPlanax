@@ -14,5 +14,6 @@ from maketrains.ppo_discrete import (
 
 from maketrains.ppo_discrete_union import (
     make_train_union_vsbaseline as make_train_ppo_discrete_union_vsbaseline,
+    save_train as save_train_ppo_discrete_union_vsbaseline,
 )
 from maketrains.configs import *

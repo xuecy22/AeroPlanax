@@ -315,6 +315,11 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             # delta velocity
             enm_delta_vt = init_state.plane_state.vt[:self.num_allies] - init_state.plane_state.vt[self.num_allies:]
             
+            # NOTE:过大的值似乎容易导致飞机crash
+            enm_delta_altitude = jnp.clip(enm_delta_altitude, -100, 100)
+            enm_delta_heading = jnp.clip(enm_delta_heading, -jnp.pi / 6, jnp.pi / 6)
+            enm_delta_vt = jnp.clip(enm_delta_vt, -20, 20)
+
             delta_altitude = jnp.hstack((ego_delta_altitude, enm_delta_altitude))
             delta_heading = jnp.hstack((ego_delta_heading, enm_delta_heading))
             delta_vt = jnp.hstack((ego_delta_vt, enm_delta_vt))
