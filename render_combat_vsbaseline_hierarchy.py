@@ -258,7 +258,7 @@ config = {
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 1,
-    "NUM_ACTORS": 4,
+    "NUM_ACTORS": 10,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -271,7 +271,10 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    # "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-25-20-51/checkpoints/checkpoint_epoch_1000" 
+    # "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/results/2025-05-01-02-01/checkpoints/checkpoint_epoch_333" # 1v1 vsbaseline
+    # "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/results/2025-05-01-02-05/checkpoints/checkpoint_epoch_333" # 2v2 vsbaseline
+    "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/results/2025-05-01-01-57/checkpoints/checkpoint_epoch_333" # 5v5 vsbaseline
+    # "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/results/2025-05-01-01-56/checkpoints/checkpoint_epoch_333" # 10v10 vsbaseline
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

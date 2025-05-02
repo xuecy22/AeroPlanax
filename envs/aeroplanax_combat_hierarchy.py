@@ -49,7 +49,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax-heading/envs/models/baseline"
+    "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/envs/models/baseline"
 }
 
 
@@ -190,8 +190,65 @@ class HierarchicalCombatTaskState(EnvState):
 
 @struct.dataclass(frozen=True)
 class HierarchicalCombatTaskParams(EnvParams):
-    num_allies: int = 1
-    num_enemies: int = 1
+    #########################################################1v1#########################################################
+    # num_allies: int = 1
+    # num_enemies: int = 1
+    # num_missiles: int = 0
+    # agent_type: int = 0
+    # action_type: int = 1
+    # observation_type: int = 0 # 0: unit_list, 1: conic
+    # unit_features: int = 6
+    # own_features: int = 9
+    # formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
+    # max_steps: int = 100
+    # sim_freq: int = 50
+    # agent_interaction_steps: int = 10
+    # max_altitude: float = 6000
+    # min_altitude: float = 6000
+    # max_vt: float = 240
+    # min_vt: float = 240
+    # safe_altitude: float = 4.0
+    # danger_altitude: float = 3.5
+    # max_distance: float = 5600
+    # min_distance: float = 5600
+    # team_spacing: float = 600
+    # safe_distance: float = 100
+    # posture_reward_scale: float = 100.0
+    # use_baseline: bool = True # 使用vsbaseline
+    # # use_baseline: bool = False
+    #########################################################1v1#########################################################
+
+    #########################################################2v2#########################################################
+    # num_allies: int = 2
+    # num_enemies: int = 2
+    # num_missiles: int = 0
+    # agent_type: int = 0
+    # action_type: int = 1
+    # observation_type: int = 0 # 0: unit_list, 1: conic
+    # unit_features: int = 6
+    # own_features: int = 9
+    # formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
+    # max_steps: int = 100
+    # sim_freq: int = 50
+    # agent_interaction_steps: int = 10
+    # max_altitude: float = 6000
+    # min_altitude: float = 6000
+    # max_vt: float = 240
+    # min_vt: float = 240
+    # safe_altitude: float = 4.0
+    # danger_altitude: float = 3.5
+    # max_distance: float = 11000
+    # min_distance: float = 11000
+    # team_spacing: float = 600
+    # safe_distance: float = 100
+    # posture_reward_scale: float = 15.0
+    # use_baseline: bool = True # 使用vsbaseline
+    # # use_baseline: bool = False
+    #########################################################2v2#########################################################
+
+    #########################################################5v5#########################################################
+    num_allies: int = 5
+    num_enemies: int = 5
     num_missiles: int = 0
     agent_type: int = 0
     action_type: int = 1
@@ -208,12 +265,42 @@ class HierarchicalCombatTaskParams(EnvParams):
     min_vt: float = 240
     safe_altitude: float = 4.0
     danger_altitude: float = 3.5
-    max_distance: float = 5600
-    min_distance: float = 5600
+    max_distance: float = 11000
+    min_distance: float = 11000
     team_spacing: float = 600
     safe_distance: float = 100
-    posture_reward_scale: float = 100.0
-    use_baseline: bool = True
+    posture_reward_scale: float = 15.0
+    use_baseline: bool = True # 使用vsbaseline
+    # use_baseline: bool = False
+    #########################################################5v5#########################################################
+
+    #########################################################10v10#########################################################
+    # num_allies: int = 10
+    # num_enemies: int = 10
+    # num_missiles: int = 0
+    # agent_type: int = 0
+    # action_type: int = 1
+    # observation_type: int = 0 # 0: unit_list, 1: conic
+    # unit_features: int = 6
+    # own_features: int = 9
+    # formation_type: int = 0 # 0: wedge, 1: line, 2: diamond
+    # max_steps: int = 100
+    # sim_freq: int = 50
+    # agent_interaction_steps: int = 10
+    # max_altitude: float = 6000
+    # min_altitude: float = 6000
+    # max_vt: float = 240
+    # min_vt: float = 240
+    # safe_altitude: float = 4.0
+    # danger_altitude: float = 3.5
+    # max_distance: float = 11000
+    # min_distance: float = 11000
+    # team_spacing: float = 600
+    # safe_distance: float = 100
+    # posture_reward_scale: float = 15.0
+    # use_baseline: bool = True # 使用vsbaseline
+    # # use_baseline: bool = False
+    #########################################################10v10#########################################################
 
 class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState, HierarchicalCombatTaskParams]):
     def __init__(self, env_params: Optional[HierarchicalCombatTaskParams] = None):
