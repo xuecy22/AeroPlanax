@@ -371,7 +371,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
 
         # NOTE: 在combat任务中，我方胜利才视作胜利
         state = state.replace(
-            done=jnp.all(dones),
+            done=jnp.all(dones[:self.num_allies]) | jnp.all(dones[self.num_allies:]),
             success=jnp.any(jnp.where(jnp.arange(self.num_agents) < self.num_allies, successes, True))
         )
             
