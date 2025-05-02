@@ -287,9 +287,9 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
             target_vt = init_state.plane_state.vt + delta_vt * 340
         else:
-            ego_delta_altitude = self.norm_delta_altitude[actions[:self.num_allies, 0]]
+            ego_delta_altitude = self.norm_delta_altitude[actions[:self.num_allies, 0]] * 1000
             ego_delta_heading = self.norm_delta_heading[actions[:self.num_allies, 1]]
-            ego_delta_vt = self.norm_delta_velocity[actions[:self.num_allies, 2]]
+            ego_delta_vt = self.norm_delta_velocity[actions[:self.num_allies, 2]] * 340
             
             ego_x = init_state.plane_state.north[self.num_allies:]
             ego_y = init_state.plane_state.east[self.num_allies:]

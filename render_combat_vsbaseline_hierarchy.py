@@ -1,8 +1,9 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+# os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
 
 import jax
+jax.config.update('jax_platform_name', 'cpu')
 import jax.numpy as jnp
 import flax.linen as nn
 import numpy as np

@@ -1,9 +1,10 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 # os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.7'
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+# os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
 import jax
+jax.config.update('jax_platform_name', 'cpu')
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 import numpy as np
