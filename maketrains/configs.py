@@ -1,11 +1,11 @@
 '''
 预设config，缺少
  - GROUP
- - OUTPUTDIR
- - LOGDIR
- - SAVEDIR
  - LOADDIR(可选)
 '''
+from datetime import datetime
+
+str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 
 BASE_CONFIG = {
     "LR": 3e-4,
@@ -22,8 +22,17 @@ BASE_CONFIG = {
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
     "DEBUG": True,
+    "OUTPUTDIR": "results/" + str_date_time,
+    "LOGDIR": "results/" + str_date_time + "/logs",
+    "SAVEDIR": "results/" + str_date_time + "/checkpoints",
 }
 
+_RENDER_CONFIG = {
+    "NUM_ENVS": 1,
+    # NOTE: ↓ unused ↓
+    "NUM_STEPS": 1000,
+    "TOTAL_TIMESTEPS": 1000,
+}
 
 _MICRO_CONFIG = {
     "NUM_ENVS": 10,
@@ -50,6 +59,7 @@ _HUGE_CONFIG = {
     "TOTAL_TIMESTEPS": 1e8,
 }
 
+RENDER_CONFIG = BASE_CONFIG | _RENDER_CONFIG
 MICRO_CONFIG = BASE_CONFIG | _MICRO_CONFIG
 MINI_CONFIG = BASE_CONFIG | _MINI_CONFIG
 MEDIUM_CONFIG = BASE_CONFIG | _MEDIUM_CONFIG

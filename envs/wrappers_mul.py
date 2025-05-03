@@ -77,6 +77,18 @@ class LogWrapper(JaxMARLWrapper):
     def ego_obs_size(self) -> int:
         return self._env._get_obs_size()
     
+    def get_env_information_for_config(self):
+        env_informations = {
+            "EGO_OBS_DIM": self._env.own_features,
+            "OTHER_OBS_DIM": self._env.unit_features,
+            "OBS_DIM": self.ego_obs_size,
+            "GLOBAL_OBS_DIM": self.global_obs_size,
+
+            "NUM_ACTORS": self._env.num_agents,
+            "NUM_VALID_AGENTS": self._env.num_allies,
+        }
+        return env_informations
+    
     @partial(jax.jit, static_argnums=(0,))
     def get_global_obs(
         self,

@@ -20,15 +20,13 @@ from envs.aeroplanax_combat_hierarchy import (
 )
 
 from maketrains import (
-    # make_train_ppo_discrete as make_train,
-    # save_train_mappo as save_train,
-
     make_train_mappo_discrete as make_train,
     save_train_mappo_discrete as save_train,
 
     MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,
+    HUGE_CONFIG
 )
 from networks import (
     init_network_mappoRNN_discrete as init_network,
@@ -39,56 +37,54 @@ PPO_DISCRETE_HIERARCHY_DEFAULT_DIMS = [3, 5, 3]
 DEFUALT_DIMS = PPO_DISCRETE_HIERARCHY_DEFAULT_DIMS
 
 env_params = TaskParams()
-env = Env(env_params)
 
 
-str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
     "SEED": 42,
-    "EGO_OBS_DIM": env.own_features,
-    "OTHER_OBS_DIM": env.unit_features,
-    "OBS_DIM": env._get_obs_size(),
-    "GLOBAL_OBS_DIM": env._get_global_obs_size(),
-
-    "NUM_ACTORS": env.num_agents,
-    "NUM_VALID_AGENTS": env.num_allies,
-    
+    "NOISE_SEED": 42,
     "GROUP": "formation",
-    "OUTPUTDIR": "results/" + str_date_time,
-    "LOGDIR": "results/" + str_date_time + "/logs",
-    "SAVEDIR": "results/" + str_date_time + "/checkpoints",
     "FOR_LOOP_EPOCHS": 50,
-    "WANDB": False,
+    "WANDB": True,
+    "WANDB_API_KEY" : "my_wandb_api_key",
     # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
 }
-# config = config | MINI_CONFIG
 config = config | MICRO_CONFIG
 config["NUM_UPDATES"] = (
     config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
 )
 
+rng = jax.random.PRNGKey(config["SEED"])
+if "NOISE_SEED" in config.keys():
+    _noise_rng = jax.random.PRNGKey(config["NOISE_SEED"])
+else:
+    rng, _noise_rng = jax.random.split(rng)
+
+env = Env(env_params)
+env = LogWrapper(env, rng=_noise_rng)
+
+# NOTE:从wrappers_mul中取得obs_dim、num_agents等数据
+config = config | env.get_env_information_for_config()
 
 if config["WANDB"]:
+    if config["WANDB_API_KEY"] == "my_wandb_api_key":
+        raise ValueError("no wandb api key!")
+    
+    os.environ['WANDB_API_KEY'] = config["WANDB_API_KEY"]
     wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
     wandb.init(
         project="AeroPlanax",
         config=config,
         name=f'seed_{config["SEED"]}',
-        group=config['GROUP'],
-        notes='form',
+        group=Env.__name__,
+        notes=Env.__name__,
         reinit=True,
     )
 
 Path(config["SAVEDIR"]).mkdir(parents=True, exist_ok=True)
 
-rng = jax.random.PRNGKey(config["SEED"])
-
-
 # INIT NETWORK
 (actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(config, DEFUALT_DIMS)
 
-rng, _noise_rng = jax.random.split(rng)
-env = LogWrapper(env, rng=_noise_rng)
 
 train_jit = jax.jit(make_train(
     config,
