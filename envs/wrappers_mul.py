@@ -53,7 +53,7 @@ class LogWrapper(JaxMARLWrapper):
         if hasattr(self._env,'noise_features') and self._env.noise_features > 0:
             self.noise_features = self._env.noise_features
             noise_amplifier = 10.0
-            self.noise_vectors = jax.random.uniform(rng, shape=(self._env.num_agents, self.noise_features)) * noise_amplifier
+            self.noise_vectors = jax.random.uniform(rng, shape=(self._env.num_allies, self.noise_features)) * noise_amplifier
         else:
             self.noise_features = 0
 

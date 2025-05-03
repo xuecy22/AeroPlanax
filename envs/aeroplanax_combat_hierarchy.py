@@ -324,15 +324,15 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         self.use_baseline = env_params.use_baseline
 
     def _get_global_obs_size(self) -> int:
-        '''global obs为 普通 obs + one-hot-agent_id'''
-        return self._get_obs_size() + self.num_agents + self.noise_features
+        '''global obs为 普通 obs + one-hot-agent_id(只有可操作agent)'''
+        return self._get_obs_size() + self.noise_features
     
     def _get_obs_size(self) -> int:
         if self.observation_type == 0:
-            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
+            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features) + self.num_allies
         elif self.observation_type == 1:
             # TODO: feat conic observations
-            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
+            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features) + self.num_allies
         else:
             raise ValueError("Provided observation type is not valid")
 
@@ -341,6 +341,8 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
     def get_raw_global_obs(self, state: HierarchicalCombatTaskState) -> chex.Array:
         '''
         返回未经处理的chex.Array,在wrapper(mulwrapper)中处理为dict
+        
+        shape: self.num_allies * global_obs_dim
         '''
         def get_features(i, j):
             """Get features of unit j as seen from unit i"""
@@ -368,12 +370,13 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         other_unit_obs = get_all_features(
             jnp.arange(self.num_agents), jnp.arange(self.num_agents - 1)
         )
-        other_unit_obs = other_unit_obs.reshape((self.num_agents, -1))
-        get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
-        own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
+        other_unit_obs = other_unit_obs.reshape((self.num_agents, -1))[:self.num_allies]
 
-        agent_ids = jnp.arange(self.num_agents)
-        one_hot_ids = jax.nn.one_hot(agent_ids, num_classes=self.num_agents)
+        get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
+        own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))[:self.num_allies]
+
+        agent_ids = jnp.arange(self.num_allies)
+        one_hot_ids = jax.nn.one_hot(agent_ids, num_classes=self.num_allies)
 
         obs = jnp.concatenate([own_unit_obs, other_unit_obs, one_hot_ids], axis=-1)
         return obs
@@ -631,7 +634,11 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         other_unit_obs = other_unit_obs.reshape((self.num_agents, -1))
         get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
         own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
-        obs = jnp.concatenate([own_unit_obs, other_unit_obs], axis=-1)
+
+        agent_ids = jnp.arange(self.num_agents)
+        one_hot_ids = jax.nn.one_hot(agent_ids, num_classes=self.num_allies)
+
+        obs = jnp.concatenate([own_unit_obs, other_unit_obs, one_hot_ids], axis=-1)
         return {agent: obs[self.agent_ids[agent]] for agent in self.agents}
     
     @functools.partial(jax.jit, static_argnums=(0,))

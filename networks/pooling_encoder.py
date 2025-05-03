@@ -1,3 +1,7 @@
+'''
+TODO:
+暂时不能使用，不适用新版global_obs
+'''
 import jax
 import optax
 import jax.numpy as jnp
