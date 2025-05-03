@@ -495,8 +495,8 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "reformation_wedge_agent_5_seed_10",
-    "SEED": 10,
+    "GROUP": "formation",
+    "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 300,
     "NUM_ACTORS": 5,

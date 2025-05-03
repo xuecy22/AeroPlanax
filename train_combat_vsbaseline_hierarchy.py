@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 os.environ['XLA_PYTHON_MEM_FRACTION'] = '0.5'
 
 import jax
@@ -519,13 +519,13 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "combat_vsbaseline_hierarchy_2v2",
+    "GROUP": "combat",
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 300,
-    "NUM_ACTORS": 4,
+    "NUM_ACTORS": 2,
     "NUM_STEPS": 1000,
-    "TOTAL_TIMESTEPS": 1e8,
+    "TOTAL_TIMESTEPS": 3e8,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,

@@ -290,7 +290,7 @@ config = {
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 1,
-    "NUM_ACTORS": 200,
+    "NUM_ACTORS": 2,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -303,7 +303,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/results/2025-05-02-20-47/checkpoints/checkpoint_epoch_333" # 100v100
+    # "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-16-21-31/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)
