@@ -142,7 +142,7 @@ def test(config, rng):
     config['NUM_ENEMIES'] = env.num_enemies
     rng = jax.random.PRNGKey(config['SEED'])
 
-    (network,_),(train_state,_),(_,_) = init_network_ppoRNN_discrete(env._get_obs_size(),env._get_obs_size(), config)
+    (network,_),(train_state,_),_ = init_network_ppoRNN_discrete(env._get_obs_size(),env._get_obs_size(), config)
 
     if "LOADDIR" in config:
         state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}

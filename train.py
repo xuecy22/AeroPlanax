@@ -21,18 +21,22 @@ from envs.aeroplanax_combat_hierarchy import (
 
 from maketrains import (
     # make_train_ppo_discrete as make_train,
-    make_train_ppo_discrete_union_vsbaseline as make_train,
     # save_train_mappo as save_train,
-    save_train_ppo_discrete_union_vsbaseline as save_train,
+
+    make_train_mappo_discrete as make_train,
+    save_train_mappo_discrete as save_train,
+
     MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,
 )
 from networks import (
     init_network_mappoRNN_discrete as init_network,
-    init_network_poolppo_discrete as init_network_poolppo,
-    init_network_ppoRNN_discrete as init_network_ppo,
+    # init_network_poolppo_discrete as init_network_poolppo,
+    # init_network_ppoRNN_discrete as init_network,
 )
+PPO_DISCRETE_HIERARCHY_DEFAULT_DIMS = [3, 5, 3]
+DEFUALT_DIMS = PPO_DISCRETE_HIERARCHY_DEFAULT_DIMS
 
 env_params = TaskParams()
 env = Env(env_params)
@@ -43,8 +47,12 @@ config = {
     "SEED": 42,
     "EGO_OBS_DIM": env.own_features,
     "OTHER_OBS_DIM": env.unit_features,
+    "OBS_DIM": env._get_obs_size(),
+    "GLOBAL_OBS_DIM": env._get_global_obs_size(),
+
     "NUM_ACTORS": env.num_agents,
     "NUM_VALID_AGENTS": env.num_allies,
+    
     "GROUP": "formation",
     "OUTPUTDIR": "results/" + str_date_time,
     "LOGDIR": "results/" + str_date_time + "/logs",
@@ -75,13 +83,22 @@ Path(config["SAVEDIR"]).mkdir(parents=True, exist_ok=True)
 
 rng = jax.random.PRNGKey(config["SEED"])
 
+
 # INIT NETWORK
-(actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network_ppo(env._get_obs_size(), env._get_obs_size(), config)
-env = LogWrapper(env)
+(actor_network, critic_network), (ac_train_state, cr_train_state), start_epoch = init_network(config, DEFUALT_DIMS)
 
-train_jit = jax.jit(make_train(config, env, (actor_network, critic_network),train_mode=True))
+rng, _noise_rng = jax.random.split(rng)
+env = LogWrapper(env, rng=_noise_rng)
 
-# TODO: save in make_train()
+train_jit = jax.jit(make_train(
+    config,
+    env,
+    (actor_network, critic_network),
+    train_mode=True,
+    # NOTE:启用频繁保存
+    # save_epochs=1
+))
+
 # dont use for loop
 for i in range(config["FOR_LOOP_EPOCHS"]):
     out = train_jit(rng, (ac_train_state, cr_train_state), start_epoch)
@@ -100,7 +117,7 @@ for i in range(config["FOR_LOOP_EPOCHS"]):
     rng = runner_state[5]
     start_epoch = jnp.array(out['runner_state'][1])
     
-    save_train(out, config["SAVEDIR"])
+    save_train((ac_train_state, cr_train_state), start_epoch, config["SAVEDIR"])
 
 if config["WANDB"]:
     wandb.finish()

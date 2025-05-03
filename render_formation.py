@@ -34,6 +34,12 @@ config = {
     "LR": 3e-4,
     "NUM_ENVS": 1,
     "NUM_ACTORS": env.num_agents,
+    "NUM_VALID_AGENTS": env.num_allies,
+    "EGO_OBS_DIM": env.own_features,
+    "OTHER_OBS_DIM": env.unit_features,
+    "OBS_DIM": env._get_obs_size(),
+    "GLOBAL_OBS_DIM": env._get_global_obs_size(),
+    
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -51,7 +57,7 @@ config = {
 }
 
 env = LogWrapper(env)
-(network, _), (ac_train_state, _), _ = init_network_mappoRNN_discrete(env, config)
+(network, _), (ac_train_state, _), _ = init_network_mappoRNN_discrete(config)
 
 network_params = ac_train_state.params
 

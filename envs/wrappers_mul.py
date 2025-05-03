@@ -44,9 +44,18 @@ class LogWrapper(JaxMARLWrapper):
     NOTE for now for envs where agents terminate at the same time.
     """
 
-    def __init__(self, env: AeroPlanaxEnv, replace_info: bool = False):
+    def __init__(self, env: AeroPlanaxEnv, replace_info: bool = False, rng: chex.PRNGKey = None):
         super().__init__(env)
         self.replace_info = replace_info
+        # @UNCHECKED
+        # NOTE:据说global_obs cat一个高斯分布噪声有助于探索，暂且放在这里
+
+        if hasattr(self._env,'noise_features') and self._env.noise_features > 0:
+            self.noise_features = self._env.noise_features
+            noise_amplifier = 10.0
+            self.noise_vectors = jax.random.uniform(rng, shape=(self._env.num_agents, self.noise_features)) * noise_amplifier
+        else:
+            self.noise_features = 0
 
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, key: chex.PRNGKey) -> Tuple[chex.Array, EnvState]: # 初始化状态和统计数据
@@ -62,7 +71,7 @@ class LogWrapper(JaxMARLWrapper):
     
     @property
     def global_obs_size(self) -> int:
-        return self._env.global_obs_size
+        return self._env._get_global_obs_size()
     
     @property
     def ego_obs_size(self) -> int:
@@ -72,8 +81,11 @@ class LogWrapper(JaxMARLWrapper):
     def get_global_obs(
         self,
         state: LogEnvState,
-    ) -> chex.Array:
-        return self._env.get_global_obs(state.env_state)
+    ) -> Dict[str, chex.Array]:
+        global_obs = self._env.get_raw_global_obs(state.env_state)
+        if self.noise_features > 0:
+            global_obs = jnp.concatenate([global_obs, self.noise_vectors], axis=-1)
+        return {agent: global_obs[self._env.agent_ids[agent]] for agent in self._env.agents}
         
     @partial(jax.jit, static_argnums=(0,))
     def step(

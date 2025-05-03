@@ -13,7 +13,11 @@ from networks.scannedRNN import ScannedRNN
 
 MAPPO_DISCRETE_DEFAULT_DIMS = [41, 41, 41, 41]
 
-class ActorRNN(nn.Module):
+'''
+@desperated
+暂时保留以读取旧模型
+'''
+class ActorRNNOldPattern(nn.Module):
     action_dim: Sequence[int]
     config: Dict
 
@@ -56,6 +60,39 @@ class ActorRNN(nn.Module):
 
         return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder)
     
+class ActorRNN(nn.Module):
+    action_dim: Sequence[int]
+    config: Dict
+
+    @nn.compact
+    def __call__(self, hidden, x):
+        obs, dones = x
+        if self.config["ACTIVATION"] == "relu":
+            activation = nn.relu
+        else:
+            activation = nn.tanh
+        embedding = nn.Dense(
+            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(obs)
+        embedding = activation(embedding)
+
+        rnn_in = (embedding, dones)
+        hidden, embedding = ScannedRNN()(hidden, rnn_in)
+
+
+        actor_mean = nn.Dense(
+            self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
+        )(embedding)
+        actor_mean = activation(actor_mean)
+
+        pi_list = []
+        for i, dim in enumerate(self.action_dim):
+            logits = nn.Dense(
+                dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0), name=f"actor_head_{i}"
+            )(actor_mean)
+            pi_list.append(distrax.Categorical(logits=logits))
+
+        return hidden, pi_list
 class CriticRNN(nn.Module):
     config: Dict
     
@@ -85,7 +122,7 @@ class CriticRNN(nn.Module):
         return hidden, jnp.squeeze(critic, axis=-1)
     
 
-def init_network(obs_size : int, global_obs_size : int, config : Dict[str, Any], discrete_action_dims : List[int] = MAPPO_DISCRETE_DEFAULT_DIMS) -> Tuple[Tuple[nn.Module, nn.Module], Tuple[TrainState, TrainState], int]:
+def init_network(config : Dict[str, Any], discrete_action_dims : List[int] = MAPPO_DISCRETE_DEFAULT_DIMS, old_model=False) -> Tuple[Tuple[nn.Module, nn.Module], Tuple[TrainState, TrainState], int]:
     rng = jax.random.PRNGKey(42)
 
     def linear_schedule(count):
@@ -95,21 +132,25 @@ def init_network(obs_size : int, global_obs_size : int, config : Dict[str, Any],
             / config["NUM_UPDATES"]
         )
         return config["LR"] * frac
+    
+    if old_model:
+        actor_network = ActorRNNOldPattern(discrete_action_dims, config=config)
+    else:
+        actor_network = ActorRNN(discrete_action_dims, config=config)
 
-    actor_network = ActorRNN(discrete_action_dims, config=config)
     critic_network = CriticRNN(config=config)
     rng, _rng_actor, _rng_critic = jax.random.split(rng, 3)
 
-    # NOTE: old ego_obs_size == *env.observation_space(env.agents[0]).shape)
-    # for hierarchy learning
     ac_init_x = (
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], obs_size)),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], config["OBS_DIM"])),
         jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
     )
     ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
     actor_network_params = actor_network.init(_rng_actor, ac_init_hstate, ac_init_x)
+    if "GLOBAL_OBS_DIM" not in config.keys():
+        config["GLOBAL_OBS_DIM"] = config["OBS_DIM"]
     cr_init_x = (
-        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], global_obs_size)),
+        jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"], config["GLOBAL_OBS_DIM"])),
         jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
     )
     cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
