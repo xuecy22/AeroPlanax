@@ -452,14 +452,17 @@ def make_train_combine_vsbaseline(
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/success_rate', metric["success"][metric["returned_episode"]].mean(), env_steps)
-                    # writer.add_scalar('eval/alive_count', metric["alive_count"][metric["returned_episode"]].mean(), env_steps)
-                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f}".format(
+                    writer.add_scalar('eval/alive_count', metric["alive_count"][metric["returned_episode"]].mean(), env_steps)
+                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessRate={:.3f} AliveCount:{:.3f}".format(
                         metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
                         metric["success"][metric["returned_episode"]].mean(),
-                        # metric["alive_count"][metric["returned_episode"]].mean(),
+                        metric["alive_count"][metric["returned_episode"]].mean(),
                     ))
+                if hasattr(env, 'train_callback') and callable(getattr(env, 'train_callback')):
+                    print(f'检测到{type(env._env).__name__}拥有自定义的train callback！')
+                    callback = functools.partial(env.train_callback, writer=writer, train_mode=train_mode)
                 jax.experimental.io_callback(callback, None, metric)
 
             return (runner_state, update_steps), None

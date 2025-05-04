@@ -11,6 +11,7 @@ from jax.typing import ArrayLike
 import chex
 from .aeroplanax import AgentName, AgentID
 
+import tensorboardX
 import functools
 import jax
 import jax.numpy as jnp
@@ -293,6 +294,8 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         # NOTE:据说global_obs cat一个高斯分布噪声有助于探索，暂且放在这里
         # see: wrappers_mul.py
         self.noise_features = 5
+        # NOTE:似乎不是必要的
+        self.enbale_actor_onehot_agent_id = False
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
             agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
@@ -324,15 +327,18 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         self.use_baseline = env_params.use_baseline
 
     def _get_global_obs_size(self) -> int:
-        '''global obs为 普通 obs + one-hot-agent_id(只有可操作agent)'''
-        return self._get_obs_size() + self.noise_features
+        '''global obs为 普通 obs + one-hot-agent_id(只有可操作agent) + noise_dim'''
+        return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features) + self.num_allies + self.noise_features
     
     def _get_obs_size(self) -> int:
-        if self.observation_type == 0:
+        if self.enbale_actor_onehot_agent_id:
             return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features) + self.num_allies
+        
+        if self.observation_type == 0:
+            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
         elif self.observation_type == 1:
             # TODO: feat conic observations
-            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features) + self.num_allies
+            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
         else:
             raise ValueError("Provided observation type is not valid")
 
@@ -546,9 +552,48 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
     ) -> Tuple[HierarchicalCombatTaskState, Dict[str, Any]]:
         """Task-specific step transition."""
         alive_mask = state.plane_state.is_alive | state.plane_state.is_locked
-        info['alive_count'] = alive_mask.sum()
+        info['alive_count'] = alive_mask[:self.num_allies].sum()
+        # NOTE:
+        # success(from super()._step_task())表示“完胜”，全部我方飞机都存活、全部敌方飞机都坠毁
+        # success_simple表示“普通胜利”，任意我方飞机存活，全部敌方飞机坠毁
+        # success_weak表示“险胜”，双方飞机都有存活，但我方飞机剩余总生命值更高
+        # blood表示我方飞机剩余总生命值与对方的差值
+        info['success_simple'] = jnp.any(alive_mask[:self.num_allies]) & jnp.all(~alive_mask[self.num_allies:])
+        
+        info['blood'] = jnp.sum(jnp.where(alive_mask, (state.plane_state.blood * jnp.where(jnp.arange(self.num_agents) < self.num_allies, 1., -1.)), 0))
+
+        info['success_weak'] = jnp.any(alive_mask[:self.num_allies]) & jnp.any(alive_mask[self.num_allies:]) & (info['blood'] > 1e-4)
         return state, info
 
+    def train_callback(self, metric: chex.Array, writer:tensorboardX.SummaryWriter, train_mode:bool):
+        # NOTE: 训练时间长容易int溢出
+        # env_steps = metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"]
+        env_steps = metric["update_steps"]
+        if train_mode:
+            for k, v in metric["loss"].items():
+                writer.add_scalar('loss/{}'.format(k), v, env_steps)
+        indexs = metric["returned_episode"]
+        valid_index_count = indexs.sum()
+
+        episodic_return = jnp.where(valid_index_count>0, metric["returned_episode_returns"][indexs].mean(), 0.)
+        episodic_length = jnp.where(valid_index_count>0, metric["returned_episode_lengths"][indexs].mean(), 0.)
+        success_rate = jnp.where(valid_index_count>0, metric["success"][indexs].mean(), 0.)
+        success_simple_rate = jnp.where(valid_index_count>0, metric["success_simple"][indexs].mean(), 0.)
+        success_weak_rate = jnp.where(valid_index_count>0, metric["success_weak"][indexs].mean(), 0.)
+        blood_advantage = jnp.where(valid_index_count>0, metric["blood"][indexs].mean(), 0.)
+        alive_count = jnp.where(valid_index_count>0, metric["alive_count"][indexs].mean(), 0.)
+
+        writer.add_scalar('eval/episodic_return', episodic_return, env_steps)
+        writer.add_scalar('eval/episodic_length', episodic_length, env_steps)
+        writer.add_scalar('eval/success_rate', success_rate, env_steps)
+        writer.add_scalar('eval/success_simple_rate', success_simple_rate, env_steps)
+        writer.add_scalar('eval/success_weak_rate', success_weak_rate, env_steps)
+        writer.add_scalar('eval/blood_advantage', blood_advantage, env_steps)
+        writer.add_scalar('eval/alive_count', alive_count, env_steps)
+
+        print(f"EnvStep={env_steps:<5} EpisodeLength={episodic_length:<7.2f} Return={episodic_return:<7.2f} SuccessRate={success_rate:.3f} " + \
+              f"SimpleSuccessRate={success_simple_rate:.3f} WeakSuccessRate={success_weak_rate:.3f} AliveCount={alive_count:>6.3f} BloodAdvantage={blood_advantage:>8.2f}")
+        
     @functools.partial(jax.jit, static_argnums=(0,))
     def _get_obs(
         self,
@@ -638,7 +683,11 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         agent_ids = jnp.arange(self.num_agents)
         one_hot_ids = jax.nn.one_hot(agent_ids, num_classes=self.num_allies)
 
-        obs = jnp.concatenate([own_unit_obs, other_unit_obs, one_hot_ids], axis=-1)
+        obs = jnp.concatenate([own_unit_obs, other_unit_obs], axis=-1)
+
+        if self.enbale_actor_onehot_agent_id:
+            obs = jnp.concatenate([obs, one_hot_ids], axis=-1)
+
         return {agent: obs[self.agent_ids[agent]] for agent in self.agents}
     
     @functools.partial(jax.jit, static_argnums=(0,))
