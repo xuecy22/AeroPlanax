@@ -465,15 +465,13 @@ def make_train(config):
                     writer.add_scalar('eval/episodic_return', metric["returned_episode_returns"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/episodic_length', metric["returned_episode_lengths"][metric["returned_episode"]].mean(), env_steps)
                     writer.add_scalar('eval/success_times', metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(), env_steps)
-                    writer.add_scalar('eval/target_heading_max', metric["target_heading"][metric["returned_episode"].squeeze()].max(), env_steps)
-                    writer.add_scalar('eval/target_heading_min', metric["target_heading"][metric["returned_episode"].squeeze()].min(), env_steps)
-                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessTimes={:.3f} TargetHeading_max={:.3f} TargetHeading_min={:.3f}".format(
+                    writer.add_scalar('eval/target_heading_mean', jnp.abs(metric["target_heading"][metric["returned_episode"].squeeze()]).mean(), env_steps)
+                    print("EnvStep={:<10} EpisodeLength={:<4.2f} Return={:<4.2f} SuccessTimes={:.3f} TargetHeading_mean={:.3f}".format(
                         metric["update_steps"] * config["NUM_ENVS"] * config["NUM_STEPS"],
                         metric["returned_episode_lengths"][metric["returned_episode"]].mean(),
                         metric["returned_episode_returns"][metric["returned_episode"]].mean(),
                         metric["heading_turn_counts"][metric["returned_episode"].squeeze()].mean(),
-                        metric["target_heading"][metric["returned_episode"].squeeze()].max(),
-                        metric["target_heading"][metric["returned_episode"].squeeze()].min(),
+                        jnp.abs(metric["target_heading"][metric["returned_episode"].squeeze()]).mean(),
                     ))
                 jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1    
@@ -499,7 +497,7 @@ def make_train(config):
 
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
-    "GROUP": "turning_maneuverability(max_5.0)",
+    "GROUP": "turning_maneuverability(max_15.0)_new20250410",
     "SEED": 42,
     "LR": 3e-4,
     "NUM_ENVS": 300,
@@ -522,7 +520,7 @@ config = {
     "OUTPUTDIR": "results/" + str_date_time,
     "LOGDIR": "results/" + str_date_time + "/logs",
     "SAVEDIR": "results/" + str_date_time + "/checkpoints",
-    "LOADDIR": "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/results/2025-04-06-14-42/checkpoints/checkpoint_epoch_1111" # baseline策略 (heading) 
+    "LOADDIR": "/home/dqy/aeroplanax/AeroPlanax_f16/results/2025-04-06-14-42/checkpoints/checkpoint_epoch_1111" # baseline策略 (heading) 
 }
 
 seed = config['SEED']
