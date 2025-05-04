@@ -8,7 +8,6 @@ import wandb
 import jax.numpy as jnp
 
 from pathlib import Path
-from datetime import datetime
 from envs.wrappers_mul import LogWrapper
 # from envs.aeroplanax_formation import (
 #     AeroPlanaxFormationEnv as Env,
@@ -23,6 +22,7 @@ from maketrains import (
     make_train_mappo_discrete as make_train,
     save_train_mappo_discrete as save_train,
 
+    RENDER_CONFIG,
     MICRO_CONFIG,
     MINI_CONFIG,
     MEDIUM_CONFIG,
@@ -45,9 +45,15 @@ config = {
     "GROUP": "formation",
     "FOR_LOOP_EPOCHS": 50,
     "WANDB": True,
+    "TRAIN": True,
     "WANDB_API_KEY" : "my_wandb_api_key",
-    # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\form_baselines\\form_0415_cp560" 
+    # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\baselines\\2v2_1500" 
 }
+'''
+NOTE:
+RENDER\MICRO用于测试
+MEDIUM已验证可以训练
+'''
 config = config | MICRO_CONFIG
 config["NUM_UPDATES"] = (
     config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
@@ -90,7 +96,7 @@ train_jit = jax.jit(make_train(
     config,
     env,
     (actor_network, critic_network),
-    train_mode=True,
+    train_mode=config["TRAIN"],
     # NOTE:启用频繁保存
     # save_epochs=1
 ))
@@ -113,7 +119,8 @@ for i in range(config["FOR_LOOP_EPOCHS"]):
     rng = runner_state[5]
     start_epoch = jnp.array(out['runner_state'][1])
     
-    save_train((ac_train_state, cr_train_state), start_epoch, config["SAVEDIR"])
+    if config["TRAIN"]:
+        save_train((ac_train_state, cr_train_state), start_epoch, config["SAVEDIR"])
 
 if config["WANDB"]:
     wandb.finish()

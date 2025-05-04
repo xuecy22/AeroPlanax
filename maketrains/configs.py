@@ -31,7 +31,7 @@ _RENDER_CONFIG = {
     "NUM_ENVS": 1,
     # NOTE: ↓ unused ↓
     "NUM_STEPS": 1000,
-    "TOTAL_TIMESTEPS": 1000,
+    "TOTAL_TIMESTEPS": 1e4,
 }
 
 _MICRO_CONFIG = {

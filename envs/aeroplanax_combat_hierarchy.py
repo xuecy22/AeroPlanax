@@ -13,6 +13,7 @@ from .aeroplanax import AgentName, AgentID
 
 import tensorboardX
 import functools
+import os
 import jax
 import jax.numpy as jnp
 from flax import struct
@@ -44,7 +45,10 @@ from envs.utils.utils import get_AO_TA_R
 import jax
 
 
+if not os.getcwd().endswith("AeroPlanax"):
+    raise ValueError("当前运行目录不是AeroPlanax,无法自动获取heading baseline文件夹位置，请手动填写LOADDIR并禁用本行代码！")
 
+print(f'combat_hierarchy policy: load heading baseline from {os.path.join(os.getcwd(),"envs/models/baseline")}')
 config = {
     "SEED": 42,
     "LR": 3e-4,
@@ -62,7 +66,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\envs\\models\\baseline"
+    "LOADDIR": os.path.join(os.getcwd(),"envs/models/baseline")
 }
 
 
