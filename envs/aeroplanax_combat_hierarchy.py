@@ -213,7 +213,7 @@ class HierarchicalCombatTaskParams(EnvParams):
     team_spacing: float = 600
     safe_distance: float = 100
     posture_reward_scale: float = 100.0
-    use_baseline: bool = True
+    use_baseline: bool = False
 
 class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState, HierarchicalCombatTaskParams]):
     def __init__(self, env_params: Optional[HierarchicalCombatTaskParams] = None):
@@ -366,8 +366,8 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         params: HierarchicalCombatTaskParams,
     ) -> HierarchicalCombatTaskState:
         """Task-specific reset."""
-
-        state = self._generate_formation(key, state, params)
+        key, key_formation = jax.random.split(key)
+        state = self._generate_formation(key_formation, state, params)
         yaw = jnp.where(jnp.arange(self.num_agents) < self.num_allies, 0.0, jnp.pi)
         q0 = jnp.where(jnp.arange(self.num_agents) < self.num_allies, 1.0, 0.0)
         q3 = jnp.where(jnp.arange(self.num_agents) < self.num_allies, 0.0, 1.0)

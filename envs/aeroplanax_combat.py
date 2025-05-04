@@ -127,7 +127,8 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
     ) -> CombatTaskState:
         """Task-specific reset."""
 
-        state = self._generate_formation(key, state, params)
+        key, key_formation = jax.random.split(key)
+        state = self._generate_formation(key_formation, state, params)
         yaw = jnp.where(jnp.arange(self.num_agents) < self.num_allies, 0.0, jnp.pi)
         q0 = jnp.where(jnp.arange(self.num_agents) < self.num_allies, 1.0, 0.0)
         q3 = jnp.where(jnp.arange(self.num_agents) < self.num_allies, 0.0, 1.0)

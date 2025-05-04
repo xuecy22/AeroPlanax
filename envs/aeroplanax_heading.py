@@ -127,7 +127,8 @@ class AeroPlanaxHeadingEnv(AeroPlanaxEnv[HeadingTaskState, HeadingTaskParams]):
         params: HeadingTaskParams,
     ) -> HeadingTaskState:
         """Task-specific reset."""
-        state = self._generate_formation(key, state, params)
+        key, key_formation = jax.random.split(key)
+        state = self._generate_formation(key_formation, state, params)
         key, key_vt = jax.random.split(key)
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
         vel_x = vt

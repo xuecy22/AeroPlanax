@@ -244,7 +244,8 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
         state: FormationTaskState,
         params: FormationTaskParams,
     ) -> FormationTaskState:
-        state, formation_positions = self._generate_formation(key, state, params)
+        key, key_formation = jax.random.split(key)
+        state, formation_positions = self._generate_formation(key_formation, state, params)
         key, key_vt = jax.random.split(key)
         vt = jax.random.uniform(key_vt, shape=(self.num_agents,), minval=params.min_vt, maxval=params.max_vt)
         vel_x = vt
@@ -417,7 +418,7 @@ class AeroPlanaxFormationEnv(AeroPlanaxEnv[FormationTaskState, FormationTaskPara
 
         R_XY = params.max_xy_increment
         R_Z = params.max_z_increment
-        key_x, key_y, key_z = jax.random.split(key, 3)
+        key, key_x, key_y, key_z = jax.random.split(key, 4)
 
         dx = jax.random.uniform(key_x, shape=(self.num_allies,), minval=-R_XY, maxval=R_XY)
         init_positions = formation_positions.at[:, 0].add(dx)
