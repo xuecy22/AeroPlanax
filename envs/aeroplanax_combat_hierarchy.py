@@ -297,7 +297,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         self.formation_type = env_params.formation_type
         # NOTE:据说global_obs cat一个高斯分布噪声有助于探索，暂且放在这里
         # see: wrappers_mul.py
-        self.noise_features = 5
+        self.noise_features = 10
         # NOTE:似乎不是必要的
         self.enbale_actor_onehot_agent_id = False
 
@@ -566,7 +566,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         
         info['blood'] = jnp.sum(jnp.where(alive_mask, (state.plane_state.blood * jnp.where(jnp.arange(self.num_agents) < self.num_allies, 1., -1.)), 0))
 
-        info['success_weak'] = jnp.any(alive_mask[:self.num_allies]) & jnp.any(alive_mask[self.num_allies:]) & (info['blood'] > 1e-4)
+        info['success_weak'] = info['success_simple'] | (jnp.any(alive_mask[:self.num_allies]) & jnp.any(alive_mask[self.num_allies:]) & (info['blood'] > 1e-4))
         return state, info
 
     def train_callback(self, metric: chex.Array, writer:tensorboardX.SummaryWriter, train_mode:bool):
