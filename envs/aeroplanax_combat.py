@@ -200,8 +200,9 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         norm_vel_x, norm_vel_y, norm_vel_z, norm_vt = vel_x / 340, vel_y / 340, vel_z / 340, vt / 340
         empty_features = jnp.zeros(shape=(self.own_features,))
         features = jnp.hstack((norm_altitude, roll_sin, roll_cos, pitch_sin, pitch_cos, norm_vel_x, norm_vel_y, norm_vel_z, norm_vt))
+        alive = state.plane_state.is_alive[i] | state.plane_state.is_locked[i]
         return jax.lax.cond(
-            state.plane_state.is_alive[i], lambda: features, lambda: empty_features
+            alive, lambda: features, lambda: empty_features
         )
 
     def get_obs_unit_list(self, state: CombatTaskState) -> Dict[str, chex.Array]:
@@ -223,8 +224,10 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
             empty_features = jnp.zeros(shape=(self.unit_features,))
             features = self._observe_features(state, i, j_idx)
             visible = features[-1] < 2
+            ego_alive = state.plane_state.is_alive[i] | state.plane_state.is_locked[i]
+            enm_alive = state.plane_state.is_alive[j_idx] | state.plane_state.is_locked[j_idx]
             return jax.lax.cond(
-                visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j_idx],
+                visible & ego_alive & enm_alive,
                 lambda: features,
                 lambda: empty_features,
             )
