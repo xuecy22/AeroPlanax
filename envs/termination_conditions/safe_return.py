@@ -24,6 +24,6 @@ def safe_return_fn(
     enemies = jax.lax.select(agent_id < params.num_allies,
                              jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, True, die),
                              jnp.where(jnp.arange(alive.shape[0]) >= params.num_allies, True, die))
-    success = jnp.all(allies) & jnp.all(enemies)
+    success = jnp.any(allies) & jnp.all(enemies)
     done = done | success
     return done, success

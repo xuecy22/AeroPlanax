@@ -184,7 +184,9 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             def update_plane_status(plane_states, crashed, shotdown, locked):
                 plane_alive = plane_states.is_alive | plane_states.is_locked
                 plane_states = plane_states.replace(
-                    status=jnp.where(jnp.logical_and(locked, plane_alive), 1, plane_states.status)
+                    status=jnp.where(plane_alive, 
+                                     jnp.where(locked, 1, 0),
+                                     plane_states.status)
                 )
                 plane_states = plane_states.replace(
                     status=jnp.where(jnp.logical_and(crashed, plane_alive), 2, plane_states.status)
@@ -512,7 +514,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         )
         state = state.replace(
             done=jnp.all(dones),
-            success=jnp.all(successes)
+            success=jnp.all(jnp.where(jnp.arange(self.num_agents) < self.num_allies, successes, True))
         )
         dones = {
             agent: dones[i] for i, agent in enumerate(self.agents)
