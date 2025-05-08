@@ -1,3 +1,6 @@
+'''
+可用于修改任务参数,将低飞机量环境训练的模型放到高飞机量环境中测试
+'''
 import os
 # os.environ['CUDA_VISIBLE_DEVICES'] = '7'
 # os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.4'
@@ -36,25 +39,17 @@ from networks import (
 PPO_DISCRETE_HIERARCHY_DEFAULT_DIMS = [3, 5, 3]
 DEFUALT_DIMS = PPO_DISCRETE_HIERARCHY_DEFAULT_DIMS
 
-env_params = TaskParams()
+env_params = TaskParams(num_allies=5, num_enemies=5, top_k_ego_obs=1,top_k_enm_obs=2,noise_features=5)
 
 
 config = {
     "SEED": 42,
     "NOISE_SEED": 42,
-    "GROUP": "formation",
     "FOR_LOOP_EPOCHS": 50,
-    "WANDB": True,
-    "TRAIN": True,
-    "WANDB_API_KEY" : "my_wandb_api_key",
-    # "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\baselines\\2v2_1500" 
+    "TRAIN": False,
+    "LOADDIR": "C:\\Users\\GoldChick\\Desktop\\rl\\AeroPlanax\\baselines\\2v2_1500" 
 }
-'''
-NOTE:
-RENDER/MICRO用于测试
-MEDIUM已验证可以训练
-'''
-config = config | MICRO_CONFIG
+config = config | RENDER_CONFIG
 config["NUM_UPDATES"] = (
     config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
 )
@@ -70,21 +65,6 @@ env = LogWrapper(env, rng=_noise_rng)
 
 # NOTE:从wrappers_mul中取得obs_dim、num_agents等数据
 config = config | env.get_env_information_for_config()
-
-if config["WANDB"]:
-    if config["WANDB_API_KEY"] == "my_wandb_api_key":
-        raise ValueError("no wandb api key!")
-    
-    os.environ['WANDB_API_KEY'] = config["WANDB_API_KEY"]
-    wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
-    wandb.init(
-        project="AeroPlanax",
-        config=config,
-        name=f'seed_{config["SEED"]}',
-        group=Env.__name__,
-        notes=Env.__name__,
-        reinit=True,
-    )
 
 Path(config["SAVEDIR"]).mkdir(parents=True, exist_ok=True)
 
@@ -121,21 +101,3 @@ for i in range(config["FOR_LOOP_EPOCHS"]):
     
     if config["TRAIN"]:
         save_train((ac_train_state, cr_train_state), start_epoch, config["SAVEDIR"])
-
-if config["WANDB"]:
-    wandb.finish()
-
-
-
-# output_dir = config["OUTPUTDIR"]
-# Path(output_dir).mkdir(parents=True, exist_ok=True)
-# import matplotlib.pyplot as plt
-# plt.plot(out["metric"]["returned_episode_returns"].mean(-1).reshape(-1))
-# plt.xlabel("Update Step")
-# plt.ylabel("Return")
-# plt.savefig(output_dir + '/returned_episode_returns.png')
-# plt.cla()
-# plt.plot(out["metric"]["returned_episode_lengths"].mean(-1).reshape(-1))
-# plt.xlabel("Update Step")
-# plt.ylabel("Return")
-# plt.savefig(output_dir + '/returned_episode_lengths.png')

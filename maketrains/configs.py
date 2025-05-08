@@ -54,8 +54,8 @@ _MEDIUM_CONFIG = {
 }
 
 _HUGE_CONFIG = {
-    "NUM_ENVS": 800,
-    "NUM_STEPS": 5000,
+    "NUM_ENVS": 4000,
+    "NUM_STEPS": 1000,
     "TOTAL_TIMESTEPS": 1e8,
 }
 

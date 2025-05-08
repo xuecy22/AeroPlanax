@@ -5,7 +5,7 @@ envs/core/utils.py.check_locked().R
 envs/core/utils.py.update_blood()
 血量更新函数
 '''
-from typing import Dict, Optional, Sequence, Any, Tuple
+from typing import Dict, Optional, Sequence, Any, Tuple, Callable
 from jax import Array
 from jax.typing import ArrayLike
 import chex
@@ -232,6 +232,10 @@ class HierarchicalCombatTaskParams(EnvParams):
     posture_reward_scale: float = 100.0
     use_baseline: bool = True
 
+    noise_features: int = 10
+    top_k_ego_obs: int = -1
+    top_k_enm_obs: int = -1
+
 '''
 TODO: 临时的reward,能够在3B step上训练到30%-40%成功率（失败的情况大概也只差一点血）
 '''
@@ -272,9 +276,6 @@ def posture_reward_fn(
     mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
     return new_reward * reward_scale * mask
 
-'''
-NOTE: 目前距离很短,5km几乎达不到(除非agent意外学会了逃跑),return可以视为 1
-'''
 def range_reward_fn(R):
     reward = 1 * (R < 5) + (R >= 5) * jnp.clip(-0.032 * R**2 + 0.284 * R + 0.38, 0.0, 1.0) \
         + jnp.clip(jnp.exp(-0.16 * R), 0, 0.2)
@@ -287,6 +288,58 @@ def orientation_reward_fn_new(AO, TA):
     reward = (AO_reward * TA_reward) ** (1/2)
     return reward
 
+'''
+更加强调agent学习攻击具体的[一个]敌机
+不过效果不佳
+'''
+def posture_reward_softmax_fn(
+        state: HierarchicalCombatTaskState,
+        params: HierarchicalCombatTaskParams,
+        agent_id: AgentID,
+        reward_scale: float = 1.0,
+        num_allies: int = 1,
+        num_enemies: int = 1,
+        temperature: float = 0.3
+    ) -> float:
+    """
+    Reward is a complex function of AO, TA and R in the last timestep.
+    """
+    # feature: (north, east, down, vn, ve, vd)
+    ego_feature = jnp.hstack((state.plane_state.north[agent_id],
+                              state.plane_state.east[agent_id],
+                              state.plane_state.altitude[agent_id],
+                              state.plane_state.vel_x[agent_id],
+                              state.plane_state.vel_y[agent_id],
+                              state.plane_state.vel_z[agent_id]))
+    enm_list = jax.lax.select(agent_id < num_allies, 
+                              jnp.arange(num_allies, num_allies + num_enemies),
+                              jnp.arange(num_allies))
+    
+    def compute_enemy_reward(enm_id):
+        enm_feature = jnp.hstack((
+            state.plane_state.north[enm_id],
+            state.plane_state.east[enm_id],
+            state.plane_state.altitude[enm_id],
+            state.plane_state.vel_x[enm_id],
+            state.plane_state.vel_y[enm_id],
+            state.plane_state.vel_z[enm_id],
+        ))
+
+        AO, TA, R, _ = get_AO_TA_R(ego_feature, enm_feature)
+        orientation_reward = orientation_reward_fn_new(AO, TA)
+        range_reward = range_reward_fn(R / 1000.0)
+        alive_or_locked = state.plane_state.is_alive[enm_id] | state.plane_state.is_locked[enm_id]
+        return orientation_reward * range_reward * alive_or_locked
+
+    per_target_rewards = jax.vmap(compute_enemy_reward)(enm_list)
+
+    # 使用 softmax with temperature 计算权重
+    weights = jax.nn.softmax(per_target_rewards / temperature)
+    weighted_reward = jnp.sum(per_target_rewards * weights)
+
+    mask = state.plane_state.is_alive[agent_id] | state.plane_state.is_locked[agent_id]
+    return weighted_reward * reward_scale * mask
+
 class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState, HierarchicalCombatTaskParams]):
     def __init__(self, env_params: Optional[HierarchicalCombatTaskParams] = None):
         super().__init__(env_params)
@@ -297,9 +350,14 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         self.formation_type = env_params.formation_type
         # NOTE:据说global_obs cat一个高斯分布噪声有助于探索，暂且放在这里
         # see: wrappers_mul.py
-        self.noise_features = 10
+        self.noise_features = env_params.noise_features
         # NOTE:似乎不是必要的
         self.enbale_actor_onehot_agent_id = False
+        # 双方各top_k个；默认为-1,不启用
+        self.top_k_ego_obs = jnp.minimum(env_params.top_k_ego_obs, self.num_allies - 1) if env_params.top_k_ego_obs > 0 else (self.num_allies - 1)
+        self.top_k_enm_obs = jnp.minimum(env_params.top_k_enm_obs, self.num_enemies) if env_params.top_k_enm_obs > 0 else self.num_enemies
+        self.one_hot_ego_classes = self.top_k_ego_obs + 1
+        self.one_hot_all_classes = self.top_k_ego_obs + self.top_k_enm_obs + 1
 
         self.observation_spaces: Dict[AgentName, spaces.Space] = {
             agent: self._get_individual_obs_space(i) for i, agent in enumerate(self.agents)
@@ -327,24 +385,27 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         self.norm_delta_altitude = jnp.array([0.1, 0.0, -0.1])
         self.norm_delta_heading = jnp.array([-jnp.pi / 6, -jnp.pi / 12, 0.0, jnp.pi / 12, jnp.pi / 6])
         self.norm_delta_velocity = jnp.array([0.05, 0.0, -0.05])
-
+        # NOTE: 如果use_baseline，意味着agent_enemy的obs、action等都无用
+        # 这些在maketrain中已做处理
         self.use_baseline = env_params.use_baseline
 
     def _get_global_obs_size(self) -> int:
         '''global obs为 普通 obs + one-hot-agent_id(只有可操作agent) + noise_dim'''
-        return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features) + self.num_agents + self.noise_features
+        return (self.unit_features * (self.top_k_ego_obs + self.top_k_enm_obs) + self.own_features) + self.one_hot_all_classes + self.noise_features
     
     def _get_obs_size(self) -> int:
         if self.enbale_actor_onehot_agent_id:
-            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features) + self.num_agents
-        
-        if self.observation_type == 0:
-            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
-        elif self.observation_type == 1:
-            # TODO: feat conic observations
-            return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
+            return (self.unit_features * (self.top_k_ego_obs + self.top_k_enm_obs) + self.own_features) + self.num_agents
         else:
-            raise ValueError("Provided observation type is not valid")
+            return (self.unit_features * (self.top_k_ego_obs + self.top_k_enm_obs) + self.own_features)
+        
+        # if self.observation_type == 0:
+        #     return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
+        # elif self.observation_type == 1:
+        #     # TODO: feat conic observations
+        #     return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
+        # else:
+        #     raise ValueError("Provided observation type is not valid")
 
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -354,43 +415,62 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         
         shape: self.num_allies * global_obs_dim
         '''
-        def get_features(i, j):
-            """Get features of unit j as seen from unit i"""
-            j = jax.lax.cond(
-                i < self.num_allies,
-                lambda: j,
-                lambda: self.num_agents - j - 1,
-            )
-            offset = jax.lax.cond(i < self.num_allies, lambda: 1, lambda: -1)
-            j_idx = jax.lax.cond(
-                ((j < i) & (i < self.num_allies)) | ((j > i) & (i >= self.num_allies)),
-                lambda: j,
-                lambda: j + offset,
-            )
+        def _get_features(state: EnvState, i, j):
+            visible = (i != j)
             empty_features = jnp.zeros(shape=(self.unit_features,))
-            features = self._observe_features(state, i, j_idx)
+            features = self._observe_features(state, i, j)
             return jax.lax.cond(
-                state.plane_state.is_alive[i] & state.plane_state.is_alive[j_idx],
+                # visible & (state.plane_state.is_alive[i] | state.plane_state.is_locked[i]) & (state.plane_state.is_alive[j] | state.plane_state.is_locked[j]),
+                visible & (state.plane_state.is_alive[i]) & (state.plane_state.is_alive[j]),
                 lambda: features,
                 lambda: empty_features,
             )
+        return self._get_own_and_top_k_other_plane_obs(state, _get_features, enable_one_hot=True)
 
-        get_all_features_for_unit = jax.vmap(get_features, in_axes=(None, 0))
-        get_all_features = jax.vmap(get_all_features_for_unit, in_axes=(0, None))
-        other_unit_obs = get_all_features(
-            jnp.arange(self.num_agents), jnp.arange(self.num_agents - 1)
-        )
-        other_unit_obs = other_unit_obs.reshape((self.num_agents, -1))
+    @functools.partial(jax.jit, static_argnums=(0, 2, 3))
+    def _get_own_and_top_k_other_plane_obs(
+        self,
+        state: HierarchicalCombatTaskState,  # 当前状态
+        observe_features_from_i_to_j: Callable[[EnvState, int, int], chex.Array],
+        enable_one_hot: bool
+    ) -> Dict[AgentName, chex.Array]:
+        pos = jnp.vstack((state.plane_state.north, state.plane_state.east, state.plane_state.altitude)).T
+        diff = pos[:, None, :] - pos[None, :, :]  # (n, n, 3)
+        distances = jnp.linalg.norm(diff, axis=-1)     # (n, n)
 
+        team_ids = jnp.arange(self.num_agents) < self.num_allies
+        team_mask = team_ids[:, None] == team_ids[None, :]
+
+        op_mask = ~team_mask
+        team_mask = team_mask & (~jnp.eye(self.num_agents, dtype=bool))
+
+        def extract_features(state, i, dist_row, team_mask_row, opponent_mask_row):
+            def get_top_k_indices(mask, k):
+                masked = jnp.where(mask, dist_row, jnp.inf)
+                return jnp.argsort(masked)[:k]
+            
+            teammate_ids = get_top_k_indices(team_mask_row, self.top_k_ego_obs)
+            opponent_ids = get_top_k_indices(opponent_mask_row, self.top_k_enm_obs)
+
+            ids = jnp.concatenate([teammate_ids, opponent_ids])
+            return jax.vmap(lambda j : observe_features_from_i_to_j(state, i, j))(ids).flatten()
+
+        other_unit_obs = jax.vmap(lambda i: extract_features(state, i, distances[i], team_mask[i], op_mask[i]), in_axes=(0,))(jnp.arange(self.num_agents))
+        
         get_all_self_features = jax.vmap(self._get_own_features, in_axes=(None, 0))
         own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
 
-        agent_ids = jnp.arange(self.num_agents)
-        one_hot_ids = jax.nn.one_hot(agent_ids, num_classes=self.num_agents)
+        if enable_one_hot:
+            agent_ids = jnp.arange(self.num_agents)
+            agent_ids = jnp.where(agent_ids < self.num_allies, agent_ids % self.one_hot_ego_classes, (agent_ids - self.num_allies) % self.one_hot_ego_classes + self.num_allies)
+            one_hot_ids = jax.nn.one_hot(agent_ids, num_classes=self.one_hot_all_classes)
+            obs = jnp.concatenate([own_unit_obs, other_unit_obs, one_hot_ids], axis=-1)
+        else:
+            obs = jnp.concatenate([own_unit_obs, other_unit_obs], axis=-1)
 
-        obs = jnp.concatenate([own_unit_obs, other_unit_obs, one_hot_ids], axis=-1)
         return obs
 
+    
     @functools.partial(jax.jit, static_argnums=(0,))
     def _decode_actions(
         self,
@@ -604,7 +684,24 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         state: HierarchicalCombatTaskState,
         params: HierarchicalCombatTaskParams,
     ) -> Dict[AgentName, chex.Array]:
-        return self.get_obs_unit_list(state)
+        pos = jnp.vstack((state.plane_state.north, state.plane_state.east, state.plane_state.altitude)).T
+        
+        visible_mask = compute_visibility_mask(pos, self.num_allies, comm_radius=50000, find_radius=50000)
+
+        def _get_features(state: EnvState, i, j):
+            empty_features = jnp.zeros(shape=(self.unit_features,))
+            features = self._observe_features(state, i, j)
+            visible1 = visible_mask[i, j]
+            visible2 = (i != j)
+            return jax.lax.cond(
+                # visible1 & visible2 & (state.plane_state.is_alive[i] | state.plane_state.is_locked[i]) & (state.plane_state.is_alive[j_idx] | state.plane_state.is_locked[j_idx]),
+                visible1 & visible2 & (state.plane_state.is_alive[i]) & (state.plane_state.is_alive[j]),
+                lambda: features,
+                lambda: empty_features,
+            )
+        obs = self._get_own_and_top_k_other_plane_obs(state, _get_features, enable_one_hot=self.enbale_actor_onehot_agent_id)
+
+        return {agent: obs[self.agent_ids[agent]] for agent in self.agents}
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _observe_features(self, state: HierarchicalCombatTaskState, i: int, j_idx: int):
@@ -670,7 +767,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
             features = self._observe_features(state, i, j_idx)
             visible = visible_mask[i, j_idx]
             return jax.lax.cond(
-                visible & state.plane_state.is_alive[i] & state.plane_state.is_alive[j_idx],
+                visible & (state.plane_state.is_alive[i]) & (state.plane_state.is_alive[j_idx]),
                 lambda: features,
                 lambda: empty_features,
             )
