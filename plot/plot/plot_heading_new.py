@@ -54,9 +54,17 @@ def read_tensorboard_data(log_dir, tag):
 def plot_heading_results():
     # 定义日志目录路径，包含三个不同种子的实验
     log_dirs = [
+        # heading task(seed:0/10/42)
         "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/heading policy(seed 0)/2025-04-21-20-31/logs_seed_0",
         "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/heading policy(seed 10)/2025-04-21-20-32/logs_seed_10",
         "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/heading policy(seed 42)/2025-04-21-20-33/logs_seed_42"
+    ]
+
+    log_dirs = [
+        # ultimate goal task(seed:0/10/42)
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/ultimate goal/ultimate_goal(max_15.0)_seed_0/logs",
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/ultimate goal/ultimate_goal(max_15.0)_seed_10/logs",
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/ultimate goal/ultimate_goal(max_15.0)_seed_42/logs"
     ]
     
     # 只绘制回合奖励指标

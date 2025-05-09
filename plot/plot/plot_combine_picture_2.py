@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from matplotlib.gridspec import GridSpec
 
-def combine_images(image_paths, output_path, nrows=1, ncols=4, figsize=(20, 5)):
+def combine_images(image_paths, output_path, nrows=1, ncols=2, figsize=(16, 5)):
     """
     将多张图片并排放置，组成一张图
     
@@ -21,7 +21,7 @@ def combine_images(image_paths, output_path, nrows=1, ncols=4, figsize=(20, 5)):
     # 加载并放置每张图片
     for i, img_path in enumerate(image_paths):
         if i >= nrows * ncols:
-            print(f"警告: 只能显示{nrows*ncols}张图片，忽略剩余图片")
+            print(f"Warning: Only {nrows*ncols} images can be displayed, ignoring remaining images")
             break
             
         row = i // ncols
@@ -34,33 +34,33 @@ def combine_images(image_paths, output_path, nrows=1, ncols=4, figsize=(20, 5)):
         ax = fig.add_subplot(gs[row, col])
         ax.imshow(img)
         ax.axis('off')  # 关闭坐标轴
-        
-        # 可选：添加图片标题
-        # img_name = os.path.basename(img_path).split('.')[0]
-        # ax.set_title(img_name, fontsize=10)
     
     # 调整布局
     plt.tight_layout()
     
     # 保存组合图片
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"已保存组合图片到: {output_path}")
+    print(f"Combined image saved to: {output_path}")
     
     # 显示图片
     plt.show()
 
 if __name__ == "__main__":
-    # 输入四个图片路径
-    image_paths = [
+    # 输入图片路径
+    combat_image_paths = [
         "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat/selfplay/combat_selfplay_single_plot.png", # selfplay
-        # 在这里添加其他三张图片的路径
         "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/Combat_Vsbaseline.png", # vs baseline
+    ]
+    
+    reformation_image_paths = [
         "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/Reformation Task (Wedge) Training Performance with Different Agent Numbers.png", # wedge different num of agents
         "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/agent_5_different_type_of_formation/Reformation Task (5 Agents) Training Performance with Different Formation Types.png" # 5 agents different type of formation
     ]
     
     # 定义输出路径
-    output_path = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combined_plots.png"
+    combat_output_path = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combined_combat_plots.png"
+    reformation_output_path = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combined_reformation_plots.png"
     
     # 组合图片
-    combine_images(image_paths, output_path, nrows=1, ncols=4, figsize=(20, 5))
+    combine_images(combat_image_paths, combat_output_path, nrows=1, ncols=2, figsize=(16, 5))
+    combine_images(reformation_image_paths, reformation_output_path, nrows=1, ncols=2, figsize=(16, 5))

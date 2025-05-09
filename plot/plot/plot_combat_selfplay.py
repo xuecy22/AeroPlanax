@@ -1120,9 +1120,13 @@ def plot_combat_performance():
     # 创建单个图表
     fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
     
-    # 为不同规模选择不同颜色
+    # # 为不同规模选择不同颜色
+    # scales = ["1v1", "2v2", "5v5"]
+    # colors = sns.color_palette("viridis", len(scales))
+
+    # 设置红绿蓝颜色
+    colors = ['red', 'green', 'dodgerblue']
     scales = ["1v1", "2v2", "5v5"]
-    colors = sns.color_palette("viridis", len(scales))
     
     # 创建颜色映射
     color_map = {scale: color for scale, color in zip(scales, colors)}

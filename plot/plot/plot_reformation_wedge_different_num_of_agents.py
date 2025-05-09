@@ -55,19 +55,19 @@ def plot_reformation_results():
     # 配置实验路径字典，以agent数量为索引
     experiments = {
         "Agent 2": [
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 2 seed 0)/2025-04-24-02-26/logs",
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 2 seed 10)/2025-04-24-02-29/logs",
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 2 seed 42)/2025-04-23-19-50/logs"
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent2_wedge_seed0/logs",
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent2_wedge_seed10/logs",
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent2_wedge_seed42/logs"
         ],
         "Agent 5": [
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 5 seed 0)/2025-04-24-02-32/logs",
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 5 seed 10)/2025-04-24-02-34/logs",
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 5 seed 42)/2025-04-24-02-41/logs"
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed0/logs",
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed10/logs",
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed42/logs"
         ],
         "Agent 10": [
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 10 seed 0)/2025-04-24-17-00/logs",
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 10 seed 10)/2025-04-24-02-46/logs",
-            "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/reformation policy(agent 10 seed 42)/2025-04-24-17-02/logs"
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent10_wedge_seed0/logs",
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent10_wedge_seed10/logs",
+            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent10_wedge_seed42/logs"
         ]
     }
     
@@ -133,9 +133,9 @@ def plot_reformation_results():
         print(f"{agent_name} 最终值: {mean_curve[-1]:.2f} ± {std_curve[-1]:.2f}")
     
     # 设置图表标题和标签
-    ax.set_title("Reformation Task Performance with Different Agent Numbers", fontsize=14)
+    ax.set_title("Reformation Task (Wedge) Training Performance with Different Agent Numbers", fontsize=14)
     ax.set_xlabel("Million Environment Steps", fontsize=12)
-    ax.set_ylabel("Average Episode Return", fontsize=12)
+    ax.set_ylabel("Average Reward", fontsize=12)
     ax.legend(loc="best", fontsize=12)
     
     # 显示网格
@@ -143,10 +143,10 @@ def plot_reformation_results():
     
     # 调整布局并保存
     plt.tight_layout()
-    output_dir = "/home/dqy/NeuralPlanex/AeroPlanex_v/AeroPlanax/plot/plot_result/reformation/together"
-    plt.savefig(f"{output_dir}reformation_by_agents.png", bbox_inches="tight")
-    plt.savefig(f"{output_dir}reformation_by_agents.pdf", bbox_inches="tight")
-    print(f"\n图表已保存为 {output_dir}reformation_by_agents.png 和 {output_dir}reformation_by_agents.pdf")
+    output_dir = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/"
+    plt.savefig(f"{output_dir}Reformation Task (Wedge) Training Performance with Different Agent Numbers.png", bbox_inches="tight")
+    plt.savefig(f"{output_dir}Reformation Task (Wedge) Training Performance with Different Agent Numbers.pdf", bbox_inches="tight")
+    print(f"\n图表已保存为 {output_dir}Reformation Task (Wedge) Training Performance with Different Agent Numbers.png 和 {output_dir}Reformation Task (Wedge) Training Performance with Different Agent Numbers.pdf")
     plt.show()
 
 # 执行主函数
