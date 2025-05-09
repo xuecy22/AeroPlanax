@@ -19,8 +19,8 @@ def safe_return_fn(
     alive = plane_state.is_alive | plane_state.is_locked
     die = plane_state.is_crashed | plane_state.is_shotdown
     allies = jax.lax.select(agent_id < params.num_allies,
-                            jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, alive, True),
-                            jnp.where(jnp.arange(alive.shape[0]) >= params.num_allies, alive, True))
+                            jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, alive, False),
+                            jnp.where(jnp.arange(alive.shape[0]) >= params.num_allies, alive, False))
     enemies = jax.lax.select(agent_id < params.num_allies,
                              jnp.where(jnp.arange(alive.shape[0]) < params.num_allies, True, die),
                              jnp.where(jnp.arange(alive.shape[0]) >= params.num_allies, True, die))

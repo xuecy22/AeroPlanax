@@ -2,6 +2,7 @@ import jax
 import functools
 import jax.numpy as jnp
 from .base_dataclass import BasePlaneState, BaseMissileState
+from ..utils.utils import get_AO_TA_R
 
 
 def check_collision(state: BasePlaneState, agent_id, R=20):
@@ -131,6 +132,38 @@ def check_hit(plane_state: BasePlaneState, missile_state: BaseMissileState, agen
     hit = jnp.any(distance < Rc)
     return hit
 
-def update_blood(state: BasePlaneState, agent_id, dt):
-    # return state.blood[agent_id] - 20 * dt * state.is_locked[agent_id]
-    return state.blood[agent_id]
+def orientation_fn(AO):
+    return jnp.where(jnp.abs(AO) <= jnp.pi / 6, 1.0 - jnp.abs(AO) / 6, 0.0)
+
+def distance_fn(R):
+    mask1 = R <= 1
+    mask2 = (R > 1) & (R <= 3)
+    result = jnp.where(mask1, 1.0, 0.0)
+    result = jnp.where(mask2, (3.0 - R) / 2.0, result)
+    return result
+
+def update_blood(state: BasePlaneState, agent_id, num_allies, num_enemies):
+    ego_feature = jnp.hstack((state.north[agent_id],
+                              state.east[agent_id],
+                              state.altitude[agent_id],
+                              state.vel_x[agent_id],
+                              state.vel_y[agent_id],
+                              state.vel_z[agent_id]))
+    enm_list = jax.lax.select(agent_id < num_allies, 
+                              jnp.arange(num_allies, num_allies + num_enemies),
+                              jnp.arange(num_allies))
+    blood = state.blood[agent_id]
+    for enm in enm_list:
+        enm_feature = jnp.hstack((state.north[enm],
+                                  state.east[enm],
+                                  state.altitude[enm],
+                                  state.vel_x[enm],
+                                  state.vel_y[enm],
+                                  state.vel_z[enm]))
+        AO, _, R, _ = get_AO_TA_R(enm_feature, ego_feature)
+        orientation_reward = orientation_fn(AO)
+        range_reward = distance_fn(R / 1000.0)
+        mask = state.is_alive[enm] | state.is_locked[enm]
+        blood -= 0.1 * orientation_reward * range_reward * mask
+    return blood
+    # return state.blood[agent_id]

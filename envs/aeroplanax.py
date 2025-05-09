@@ -38,6 +38,7 @@ class EnvParams(environment.EnvParams):
     max_steps: int = 100
     sim_freq: int = 50
     agent_interaction_steps: int = 1
+    use_artillery: bool = False
     map_size_enu: Tuple[float, float, float] = (200., 200., 10.)    # unit: km
     map_origin_geodetic: Tuple[float, float, float] = (0., 0., 0.)  # unit: deg/km
 
@@ -74,6 +75,7 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
         self.agent_type = env_params.agent_type
         self.action_type = env_params.action_type
         self.agent_interaction_steps = env_params.agent_interaction_steps
+        self.use_artillery = env_params.use_artillery
 
         self.reward_functions: List[Callable[[TEnvState, TEnvParams, AgentID], float]] = []
         self.is_potential: List[bool] = []
@@ -211,10 +213,11 @@ class AeroPlanaxEnv(Generic[TEnvState, TEnvParams]):
             crashed = jax.vmap(
                 check_crashed, in_axes=(None, 0)
                 )(plane_states, jnp.arange(self.num_agents))
-            blood = jax.vmap(
-                update_blood, in_axes=(None, 0, None)
-                )(plane_states, jnp.arange(self.num_agents), 1 / params.sim_freq)
-            plane_states = plane_states.replace(blood=blood)
+            if self.use_artillery:
+                blood = jax.vmap(
+                    update_blood, in_axes=(None, 0, None, None)
+                    )(plane_states, jnp.arange(self.num_agents), self.num_allies, self.num_enemies)
+                plane_states = plane_states.replace(blood=blood)
 
             # 创建与 locked 形状相同的全 False 数组
             false_locked = jnp.zeros_like(crashed, dtype=bool)  # 确保类型和形状一致

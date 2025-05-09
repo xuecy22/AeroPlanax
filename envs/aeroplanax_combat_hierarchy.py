@@ -202,6 +202,7 @@ class HierarchicalCombatTaskParams(EnvParams):
     max_steps: int = 100
     sim_freq: int = 50
     agent_interaction_steps: int = 10
+    use_artillery: bool = False
     max_altitude: float = 6000
     min_altitude: float = 6000
     max_vt: float = 240
