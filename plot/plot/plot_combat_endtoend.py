@@ -90,7 +90,7 @@ def plot_combat_performance():
     
     # 为不同规模选择不同颜色
     scales = ["1v1", "2v2", "5v5"]
-    colors = sns.color_palette("viridis", len(scales))
+    colors = ['red', 'green', 'dodgerblue']
     
     # 创建颜色映射
     color_map = {scale: color for scale, color in zip(scales, colors)}
