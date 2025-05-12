@@ -246,12 +246,24 @@ def test(config, rng):
         ego_init_hstate,
         _rng,
     )
-    for _ in range(1000):
+    success_counts = 0
+    done_counts = 0
+    for _ in range(2000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
-        print(f'Time: {env_state.time}, Done: {test_state[2]}, Reward: {traj_batch.reward}, Episodic_return: {test_state[0].returned_episode_returns}, Status: {env_state.plane_state.status}')
+        done = jnp.any(traj_batch.info["returned_episode"])
+        success = jnp.any(traj_batch.info["success"])
+        if done == True:
+            done_counts += 1
+            if success == True:
+                success_counts += 1
+            elif traj_batch.info["ally_blood"] > traj_batch.info["enemy_blood"]:
+                success_counts += 1
+            else:
+                pass
+        print(f'Time: {env_state.time}, Done: {done}, Success: {success}, Reward: {traj_batch.reward}, Ally Blood: {traj_batch.info["ally_blood"]}, Enemy Blood: {traj_batch.info["enemy_blood"]}')
         
-    return {"test_state": test_state, "trajectory": traj_batch}
+    return {"test_state": test_state, "trajectory": traj_batch, "success_rate": success_counts / done_counts}
 
 
 config = {
@@ -271,7 +283,8 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    # "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-25-20-51/checkpoints/checkpoint_epoch_1000" 
+    "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-28-00-15/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)
+print(out["success_rate"])

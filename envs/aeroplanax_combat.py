@@ -155,6 +155,8 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         params: CombatTaskParams,
     ) -> Tuple[CombatTaskState, Dict[str, Any]]:
         """Task-specific step transition."""
+        info["ally_blood"] = jnp.sum(state.plane_state.blood[:self.num_allies])
+        info["enemy_blood"] = jnp.sum(state.plane_state.blood[self.num_allies:])
         return state, info
 
     @functools.partial(jax.jit, static_argnums=(0,))
