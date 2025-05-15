@@ -214,7 +214,8 @@ class HierarchicalCombatTaskParams(EnvParams):
     team_spacing: float = 600
     safe_distance: float = 100
     posture_reward_scale: float = 100.0
-    use_baseline: bool = False
+    use_baseline: bool = True
+    use_hierarchy: bool = False
 
 class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState, HierarchicalCombatTaskParams]):
     def __init__(self, env_params: Optional[HierarchicalCombatTaskParams] = None):
@@ -252,6 +253,7 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
         self.norm_delta_velocity = jnp.array([0.05, 0.0, -0.05])
 
         self.use_baseline = env_params.use_baseline
+        self.use_hierarchy = env_params.use_hierarchy
 
     def _get_obs_size(self) -> int:
         if self.observation_type == 0:
@@ -272,76 +274,151 @@ class AeroPlanaxHierarchicalCombatEnv(AeroPlanaxEnv[HierarchicalCombatTaskState,
     ):
         # unpack actions
         actions = jnp.array([actions[i] for i in self.agents])
-        if not self.use_baseline:
-            delta_altitude = self.norm_delta_altitude[actions[:, 0]]
-            delta_heading = self.norm_delta_heading[actions[:, 1]]
-            delta_vt = self.norm_delta_velocity[actions[:, 2]]
+        if self.use_hierarchy:
+            if not self.use_baseline:
+                delta_altitude = self.norm_delta_altitude[actions[:, 0]]
+                delta_heading = self.norm_delta_heading[actions[:, 1]]
+                delta_vt = self.norm_delta_velocity[actions[:, 2]]
 
-            target_altitude = init_state.plane_state.altitude + delta_altitude * 1000
-            target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
-            target_vt = init_state.plane_state.vt + delta_vt * 340
+                target_altitude = init_state.plane_state.altitude + delta_altitude * 1000
+                target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+                target_vt = init_state.plane_state.vt + delta_vt * 340
+            else:
+                ego_delta_altitude = self.norm_delta_altitude[actions[:self.num_allies, 0]]
+                ego_delta_heading = self.norm_delta_heading[actions[:self.num_allies, 1]]
+                ego_delta_vt = self.norm_delta_velocity[actions[:self.num_allies, 2]]
+                
+                ego_x = init_state.plane_state.north[self.num_allies:]
+                ego_y = init_state.plane_state.east[self.num_allies:]
+                ego_z = init_state.plane_state.altitude[self.num_allies:]
+
+                ego_vx = init_state.plane_state.vel_x[self.num_allies:]
+                ego_vy = init_state.plane_state.vel_y[self.num_allies:]
+                
+                enm_x = init_state.plane_state.north[:self.num_allies]
+                enm_y = init_state.plane_state.east[:self.num_allies]
+                enm_z = init_state.plane_state.altitude[:self.num_allies]
+                # delta altitude
+                enm_delta_altitude = enm_z - ego_z
+                # delta heading
+                ego_v = jnp.linalg.norm(jnp.vstack((ego_vx, ego_vy)), axis=0)
+                delta_x, delta_y = enm_x - ego_x, enm_y - ego_y
+                R = jnp.linalg.norm(jnp.vstack((delta_x, delta_y)), axis=0)
+                proj_dist = delta_x * ego_vx + delta_y * ego_vy
+                ego_AO = jnp.arccos(jnp.clip(proj_dist / (R * ego_v + 1e-6), -1, 1))
+                # side_flag = jnp.sign(jnp.cross(jnp.vstack((ego_vx, ego_vy)), jnp.vstack((delta_x, delta_y))))
+                side_flag = jnp.sign(ego_vx * delta_y - ego_vy * delta_x)
+                enm_delta_heading = ego_AO * side_flag
+                # delta velocity
+                enm_delta_vt = init_state.plane_state.vt[:self.num_allies] - init_state.plane_state.vt[self.num_allies:]
+                
+                delta_altitude = jnp.hstack((ego_delta_altitude, enm_delta_altitude))
+                delta_heading = jnp.hstack((ego_delta_heading, enm_delta_heading))
+                delta_vt = jnp.hstack((ego_delta_vt, enm_delta_vt))
+                
+                target_altitude = init_state.plane_state.altitude + delta_altitude
+                target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+                target_vt = init_state.plane_state.vt + delta_vt
+            last_obs = self._get_controller_obs(state.plane_state, target_altitude, target_heading, target_vt)
+            last_obs = jnp.transpose(last_obs)
+            last_done = jnp.zeros((self.num_agents), dtype=bool)
+            ac_in = (
+                last_obs[np.newaxis, :],
+                last_done[np.newaxis, :],
+            )
+            hstate, pi, _ = controller.apply(controller_params, state.hstate, ac_in)
+            pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+
+            key, key_throttle = jax.random.split(key)
+            action_throttle = pi_throttle.sample(seed=key_throttle)
+            key, key_elevator = jax.random.split(key)
+            action_elevator = pi_elevator.sample(seed=key_elevator)
+            key, key_aileron = jax.random.split(key)
+            action_aileron = pi_aileron.sample(seed=key_aileron)
+            key, key_rudder = jax.random.split(key)
+            action_rudder = pi_rudder.sample(seed=key_rudder)
+
+            action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
+                                      action_elevator[:, :, np.newaxis], 
+                                      action_aileron[:, :, np.newaxis], 
+                                      action_rudder[:, :, np.newaxis]], axis=-1)
+            state = state.replace(hstate=hstate)
+            action = action.squeeze(0)
+            action = jax.vmap(self._decode_discrete_actions)(action)
         else:
-            ego_delta_altitude = self.norm_delta_altitude[actions[:self.num_allies, 0]]
-            ego_delta_heading = self.norm_delta_heading[actions[:self.num_allies, 1]]
-            ego_delta_vt = self.norm_delta_velocity[actions[:self.num_allies, 2]]
-            
-            ego_x = init_state.plane_state.north[self.num_allies:]
-            ego_y = init_state.plane_state.east[self.num_allies:]
-            ego_z = init_state.plane_state.altitude[self.num_allies:]
+            if not self.use_baseline:
+                if self.agent_type == 0:
+                    if self.action_type == 0:
+                        actions = jnp.clip(actions, min=-1, max=1)
+                        return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+                    elif self.action_type == 1:
+                        actions = jax.vmap(self._decode_discrete_actions)(actions)
+                        return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+                    else:
+                        raise NotImplementedError
+                elif self.agent_type == 1:
+                    raise NotImplementedError
+                elif self.agent_type == 2:
+                    raise NotImplementedError
+            else:
+                ego_x = init_state.plane_state.north[self.num_allies:]
+                ego_y = init_state.plane_state.east[self.num_allies:]
+                ego_z = init_state.plane_state.altitude[self.num_allies:]
 
-            ego_vx = init_state.plane_state.vel_x[self.num_allies:]
-            ego_vy = init_state.plane_state.vel_y[self.num_allies:]
-            
-            enm_x = init_state.plane_state.north[:self.num_allies]
-            enm_y = init_state.plane_state.east[:self.num_allies]
-            enm_z = init_state.plane_state.altitude[:self.num_allies]
-            # delta altitude
-            enm_delta_altitude = enm_z - ego_z
-            # delta heading
-            ego_v = jnp.linalg.norm(jnp.vstack((ego_vx, ego_vy)), axis=0)
-            delta_x, delta_y = enm_x - ego_x, enm_y - ego_y
-            R = jnp.linalg.norm(jnp.vstack((delta_x, delta_y)), axis=0)
-            proj_dist = delta_x * ego_vx + delta_y * ego_vy
-            ego_AO = jnp.arccos(jnp.clip(proj_dist / (R * ego_v + 1e-6), -1, 1))
-            # side_flag = jnp.sign(jnp.cross(jnp.vstack((ego_vx, ego_vy)), jnp.vstack((delta_x, delta_y))))
-            side_flag = jnp.sign(ego_vx * delta_y - ego_vy * delta_x)
-            enm_delta_heading = ego_AO * side_flag
-            # delta velocity
-            enm_delta_vt = init_state.plane_state.vt[:self.num_allies] - init_state.plane_state.vt[self.num_allies:]
-            
-            delta_altitude = jnp.hstack((ego_delta_altitude, enm_delta_altitude))
-            delta_heading = jnp.hstack((ego_delta_heading, enm_delta_heading))
-            delta_vt = jnp.hstack((ego_delta_vt, enm_delta_vt))
-            
-            target_altitude = init_state.plane_state.altitude + delta_altitude
-            target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
-            target_vt = init_state.plane_state.vt + delta_vt
-        last_obs = self._get_controller_obs(state.plane_state, target_altitude, target_heading, target_vt)
-        last_obs = jnp.transpose(last_obs)
-        last_done = jnp.zeros((self.num_agents), dtype=bool)
-        ac_in = (
-            last_obs[np.newaxis, :],
-            last_done[np.newaxis, :],
-        )
-        hstate, pi, _ = controller.apply(controller_params, state.hstate, ac_in)
-        pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+                ego_vx = init_state.plane_state.vel_x[self.num_allies:]
+                ego_vy = init_state.plane_state.vel_y[self.num_allies:]
+                
+                enm_x = init_state.plane_state.north[:self.num_allies]
+                enm_y = init_state.plane_state.east[:self.num_allies]
+                enm_z = init_state.plane_state.altitude[:self.num_allies]
+                # delta altitude
+                enm_delta_altitude = enm_z - ego_z
+                # delta heading
+                ego_v = jnp.linalg.norm(jnp.vstack((ego_vx, ego_vy)), axis=0)
+                delta_x, delta_y = enm_x - ego_x, enm_y - ego_y
+                R = jnp.linalg.norm(jnp.vstack((delta_x, delta_y)), axis=0)
+                proj_dist = delta_x * ego_vx + delta_y * ego_vy
+                ego_AO = jnp.arccos(jnp.clip(proj_dist / (R * ego_v + 1e-6), -1, 1))
+                # side_flag = jnp.sign(jnp.cross(jnp.vstack((ego_vx, ego_vy)), jnp.vstack((delta_x, delta_y))))
+                side_flag = jnp.sign(ego_vx * delta_y - ego_vy * delta_x)
+                enm_delta_heading = ego_AO * side_flag
+                # delta velocity
+                enm_delta_vt = init_state.plane_state.vt[:self.num_allies] - init_state.plane_state.vt[self.num_allies:]
+                
+                delta_altitude = jnp.hstack((jnp.zeros_like(enm_delta_altitude), enm_delta_altitude))
+                delta_heading = jnp.hstack((jnp.zeros_like(enm_delta_heading), enm_delta_heading))
+                delta_vt = jnp.hstack((jnp.zeros_like(enm_delta_vt), enm_delta_vt))
+                
+                target_altitude = init_state.plane_state.altitude + delta_altitude
+                target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+                target_vt = init_state.plane_state.vt + delta_vt
+                last_obs = self._get_controller_obs(state.plane_state, target_altitude, target_heading, target_vt)
+                last_obs = jnp.transpose(last_obs)
+                last_done = jnp.zeros((self.num_agents), dtype=bool)
+                ac_in = (
+                    last_obs[np.newaxis, :],
+                    last_done[np.newaxis, :],
+                )
+                hstate, pi, _ = controller.apply(controller_params, state.hstate, ac_in)
+                pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
 
-        key, key_throttle = jax.random.split(key)
-        action_throttle = pi_throttle.sample(seed=key_throttle)
-        key, key_elevator = jax.random.split(key)
-        action_elevator = pi_elevator.sample(seed=key_elevator)
-        key, key_aileron = jax.random.split(key)
-        action_aileron = pi_aileron.sample(seed=key_aileron)
-        key, key_rudder = jax.random.split(key)
-        action_rudder = pi_rudder.sample(seed=key_rudder)
+                key, key_throttle = jax.random.split(key)
+                action_throttle = pi_throttle.sample(seed=key_throttle)
+                key, key_elevator = jax.random.split(key)
+                action_elevator = pi_elevator.sample(seed=key_elevator)
+                key, key_aileron = jax.random.split(key)
+                action_aileron = pi_aileron.sample(seed=key_aileron)
+                key, key_rudder = jax.random.split(key)
+                action_rudder = pi_rudder.sample(seed=key_rudder)
 
-        action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
-                                  action_elevator[:, :, np.newaxis], 
-                                  action_aileron[:, :, np.newaxis], 
-                                  action_rudder[:, :, np.newaxis]], axis=-1)
-        state = state.replace(hstate=hstate)
-        action = action.squeeze(0)
-        action = jax.vmap(self._decode_discrete_actions)(action)
+                action = jnp.concatenate([action_throttle[:, :, np.newaxis], 
+                                          action_elevator[:, :, np.newaxis], 
+                                          action_aileron[:, :, np.newaxis], 
+                                          action_rudder[:, :, np.newaxis]], axis=-1)
+                state = state.replace(hstate=hstate)
+                action = action.squeeze(0)
+                action = jnp.vstack((actions[:self.num_allies], action[self.num_allies:]))
+                action = jax.vmap(self._decode_discrete_actions)(action)
         return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(action)
 
     @property
