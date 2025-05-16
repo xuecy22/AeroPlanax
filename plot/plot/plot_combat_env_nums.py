@@ -61,19 +61,28 @@ def plot_combat_performance():
         "ENV_NUM : 30": {
             "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_30_seed0/logs"],
             "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_30_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_30_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_30_seed30/logs"],
             "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_30_seed42/logs"],
         },
         "ENV_NUM : 300": {
             "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_300_seed0/logs"],
             "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_300_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_300_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_300_seed30/logs"],
             "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_300_seed42/logs"],
         },
         "ENV_NUM : 3000": {
             "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_3000_seed0/logs"],
             "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_3000_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_3000_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_3000_seed42/logs"],
             "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/combat_agent2_vsbaseline_NUM_ENVS_3000_seed42/logs"],
         },
     }
+    
+    # 这里所有数据都是1v1（agent2表示总共2个智能体），所以不需要缩放
+    scale_factor = 1.0  # 设置为1表示保持原值
     
     # 要绘制的指标
     metric = "eval/episodic_return"
@@ -120,7 +129,7 @@ def plot_combat_performance():
                     continue
                 
                 # 平滑处理
-                _, smoothed_data = process_single_run_data(data['value'].values, window_size=80)
+                _, smoothed_data = process_single_run_data(data['value'].values, window_size=5)
                 all_scale_curves.append(smoothed_data)
                 
                 # 记录当前规模的最短曲线长度
@@ -153,19 +162,23 @@ def plot_combat_performance():
         mean_curve = np.mean(all_scale_curves, axis=0)
         std_curve = np.std(all_scale_curves, axis=0)
         
+        # 应用缩放（在这种情况下不需要缩放）
+        scaled_mean_curve = mean_curve * scale_factor
+        scaled_std_curve = std_curve * scale_factor
+        
         # 创建x轴(环境步数，单位为百万)
         x = np.arange(0, global_min_length) * (300*1000/1e6)  # 假设每300k步记录一次
         
         # 绘制均值曲线
-        ax.plot(x, mean_curve, color=color_map[scale], label=f"{scale}", linewidth=2)
+        ax.plot(x, scaled_mean_curve, color=color_map[scale], label=f"{scale}", linewidth=2)
         
         # 添加标准差区域
-        ax.fill_between(x, mean_curve - std_curve, mean_curve + std_curve, 
+        ax.fill_between(x, scaled_mean_curve - scaled_std_curve, scaled_mean_curve + scaled_std_curve, 
                        color=color_map[scale], alpha=0.2)
         
         # 记录最终性能
-        final_perf = mean_curve[-1]
-        final_std = std_curve[-1]
+        final_perf = scaled_mean_curve[-1]
+        final_std = scaled_std_curve[-1]
         final_performance[scale] = (final_perf, final_std)
         print(f"{scale} final performance: {final_perf:.2f} ± {final_std:.2f}")
     

@@ -48,19 +48,26 @@ def combine_images(image_paths, output_path, nrows=1, ncols=2, figsize=(16, 5)):
 if __name__ == "__main__":
     # 输入图片路径
     combat_image_paths = [
-        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat/selfplay/combat_selfplay_single_plot.png", # selfplay
-        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/Combat_Vsbaseline.png", # vs baseline
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat/selfplay/combat_selfplay_normalized.png", # selfplay
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/Combat_Vsbaseline_Normalized.png", # vs baseline
     ]
     
     reformation_image_paths = [
         "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/Reformation Task (Wedge) Training Performance with Different Agent Numbers.png", # wedge different num of agents
         "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/agent_5_different_type_of_formation/Reformation Task (5 Agents) Training Performance with Different Formation Types.png" # 5 agents different type of formation
     ]
+
+    combat_selfplay_with_different_communication_distances_and_different_num_envs_image_paths = [
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/combat_selfplay_new/combat_selfplay_different_distance_normalized.png", # combat selfplay with different communication distances
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/different NUM ENVS/Combat_Different_NUM_ENVS.png" # combat selfplay with different num envs
+    ]
     
     # 定义输出路径
     combat_output_path = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combined_combat_plots.png"
     reformation_output_path = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combined_reformation_plots.png"
+    combat_selfplay_with_different_communication_distances_and_different_num_envs_output_path = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combined_combat_selfplay_with_different_communication_distances_and_different_num_envs_plots.png"
     
     # 组合图片
     combine_images(combat_image_paths, combat_output_path, nrows=1, ncols=2, figsize=(16, 5))
     combine_images(reformation_image_paths, reformation_output_path, nrows=1, ncols=2, figsize=(16, 5))
+    combine_images(combat_selfplay_with_different_communication_distances_and_different_num_envs_image_paths, combat_selfplay_with_different_communication_distances_and_different_num_envs_output_path, nrows=1, ncols=2, figsize=(16, 5))

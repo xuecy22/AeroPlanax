@@ -1,0 +1,204 @@
+import os
+import seaborn as sns
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import matplotlib as mpl
+from tensorboard.backend.event_processing import event_accumulator
+
+# 设置支持中文显示
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体为黑体
+plt.rcParams['axes.unicode_minus'] = False  # 解决保存图像时负号'-'显示为方块的问题
+
+# 定义平滑函数
+def smoother(x, a=0.9, w=1, mode="window"):
+    if mode == "window":
+        y = []
+        for i in range(len(x)):
+            y.append(np.mean(x[max(i - w, 0):i + 1]))
+    elif mode == "moving":
+        y = [x[0]]
+        for i in range(1, len(x)):
+            y.append((1 - a) * x[i] + a * y[i - 1])
+    else:
+        raise NotImplementedError
+    return y
+
+# 处理单个数据集并应用平滑
+def process_single_run_data(data, window_size=80, scale=1.0):
+    # 应用平滑
+    smoothed_data = smoother(np.asarray(data), w=window_size, mode="window")
+    x = np.arange(0, len(smoothed_data)) * scale
+    return x, smoothed_data
+
+# 从tensorboard日志中读取数据
+def read_tensorboard_data(log_dir, tag):
+    try:
+        ea = event_accumulator.EventAccumulator(
+            log_dir,
+            size_guidance={
+                event_accumulator.SCALARS: 0,  # 加载所有scalars
+            }
+        )
+        ea.Reload()
+        
+        if tag not in ea.scalars.Keys():
+            print(f"找不到标签 {tag} 在 {log_dir}")
+            return None
+        
+        # 获取数据并转换为DataFrame
+        events = ea.Scalars(tag)
+        data = pd.DataFrame([(e.step, e.value) for e in events], 
+                           columns=['step', 'value'])
+        return data
+    except Exception as e:
+        print(f"处理 {log_dir} 时出错: {e}")
+        return None
+
+def plot_combat_performance():
+    # 配置不同规模的实验路径，按规模分组
+    experiments_by_scale = {
+        "5 km": {
+            "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance5_agent10_selfplay_seed0/logs"],
+            "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance5_agent10_selfplay_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance5_agent10_selfplay_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance5_agent10_selfplay_seed30/logs"],
+            "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance5_agent10_selfplay_seed42/logs"],
+        },
+        "10 km": {
+            "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance10_agent10_selfplay_seed0/logs"],
+            "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance10_agent10_selfplay_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance10_agent10_selfplay_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance10_agent10_selfplay_seed30/logs"],
+            "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance10_agent10_selfplay_seed42/logs"],
+        },
+        "20 km": {
+            "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance20_agent10_selfplay_seed0/logs"],
+            "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance20_agent10_selfplay_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance20_agent10_selfplay_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance20_agent10_selfplay_seed30/logs"],
+            "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/combat_selfplay_new/5v5 different communication distance/combat_distance20_agent10_selfplay_seed42/logs"],
+        },
+    }
+    
+    # 设置统一的缩放因子，对于5v5的数据
+    scale_factor = 100/15/5  # 该脚本全部是5v5数据，所以统一使用5v5的缩放因子
+    
+    # 要绘制的指标
+    metric = "eval/episodic_return"
+    
+    # 设置绘图风格
+    sns.set_theme(
+        style="darkgrid",
+        font_scale=1.2,
+        rc={"figure.figsize": (12, 8)}
+    )
+    
+    # 创建单个图表
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
+
+    # 设置红绿蓝颜色
+    colors = ['red', 'green', 'dodgerblue']
+    scales = ["5 km", "10 km", "20 km"]
+    
+    # 创建颜色映射
+    color_map = {scale: color for scale, color in zip(scales, colors)}
+    
+    # 存储最终性能数据以便后续总结
+    final_performance = {}
+    original_final_performance = {}
+    
+    # 处理每个规模的实验
+    for scale, seeds_data in experiments_by_scale.items():
+        print(f"\n处理 {scale} 规模的数据")
+        
+        # 存储这个规模下所有种子的曲线
+        all_scale_curves = []
+        min_length = float('inf')
+        
+        # 处理每个种子的数据
+        for seed_name, log_dirs in seeds_data.items():
+            # 处理每个日志目录
+            for log_dir in log_dirs:
+                data = read_tensorboard_data(log_dir, metric)
+                if data is None or data.empty:
+                    print(f"警告: 无法读取 {log_dir} 的数据")
+                    continue
+                
+                # 平滑处理
+                _, smoothed_data = process_single_run_data(data['value'].values, window_size=5)
+                all_scale_curves.append(smoothed_data)
+                
+                # 记录最短曲线长度
+                min_length = min(min_length, len(smoothed_data))
+        
+        # 如果没有有效数据，跳过此规模
+        if not all_scale_curves:
+            print(f"跳过 {scale}: 没有有效数据")
+            continue
+            
+        # 截断所有曲线到相同长度
+        all_scale_curves = [curve[:min_length] for curve in all_scale_curves]
+        
+        # 转换为numpy数组并计算统计量
+        all_scale_curves = np.array(all_scale_curves)
+        mean_curve = np.mean(all_scale_curves, axis=0)
+        std_curve = np.std(all_scale_curves, axis=0)
+        
+        # 保存原始最终性能
+        original_final_perf = mean_curve[-1]
+        original_final_std = std_curve[-1]
+        original_final_performance[scale] = (original_final_perf, original_final_std)
+        
+        # 应用缩放系数
+        scaled_mean_curve = mean_curve * scale_factor
+        scaled_std_curve = std_curve * scale_factor
+        
+        # 创建x轴(环境步数，单位为百万)
+        x = np.arange(0, min_length) * (300*1000/1e6)  # 假设每300k步记录一次
+        
+        # 绘制均值曲线
+        ax.plot(x, scaled_mean_curve, color=color_map[scale], label=f"{scale}", linewidth=2)
+        
+        # 添加标准差区域
+        ax.fill_between(x, scaled_mean_curve - scaled_std_curve, scaled_mean_curve + scaled_std_curve, 
+                       color=color_map[scale], alpha=0.2)
+        
+        # 记录缩放后的最终性能
+        final_perf = scaled_mean_curve[-1]
+        final_std = scaled_std_curve[-1]
+        final_performance[scale] = (final_perf, final_std)
+        print(f"{scale} 最终性能 (缩放前): {original_final_perf:.2f} ± {original_final_std:.2f}")
+        print(f"{scale} 最终性能 (缩放后): {final_perf:.2f} ± {final_std:.2f}, 缩放系数: {scale_factor:.4f}")
+    
+    # 设置图表标题和标签
+    ax.set_title("Combat Task (SelfPlay) Training Performance with Different Communication Distances (Normalized)", fontsize=16)
+    ax.set_xlabel("Million Environment Steps", fontsize=14)
+    ax.set_ylabel("Normalized Reward", fontsize=14)
+    ax.legend(loc="lower right", fontsize=12)
+    
+    # 添加网格
+    ax.grid(True, linestyle='--', alpha=0.7)
+    
+    # 调整布局并保存
+    plt.tight_layout()
+    output_dir = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/combat_selfplay_new/"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    plt.savefig(f"{output_dir}combat_selfplay_different_distance_normalized.png", bbox_inches="tight")
+    plt.savefig(f"{output_dir}combat_selfplay_different_distance_normalized.pdf", bbox_inches="tight")
+    print(f"\n图表已保存为 {output_dir}combat_selfplay_different_distance_normalized.png 和 .pdf")
+    
+    # 输出最终性能总结
+    print("\n原始最终性能总结:")
+    for scale, (perf, std) in original_final_performance.items():
+        print(f"{scale}: {perf:.2f} ± {std:.2f}")
+        
+    print("\n缩放后最终性能总结:")
+    for scale, (perf, std) in final_performance.items():
+        print(f"{scale}: {perf:.2f} ± {std:.2f}, 缩放系数: {scale_factor:.4f}")
+    
+    plt.show()
+
+if __name__ == "__main__":
+    plot_combat_performance()

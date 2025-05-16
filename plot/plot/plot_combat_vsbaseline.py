@@ -61,22 +61,56 @@ def plot_combat_performance():
         "1v1": {
             "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent2_vsbaseline_seed0/logs"],
             "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent2_vsbaseline_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent2_vsbaseline_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent2_vsbaseline_seed30/logs"],
             "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent2_vsbaseline_seed42/logs"],
         },
         "2v2": {
             "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent4_vsbaseline_seed0/logs"],
             "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent4_vsbaseline_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent4_vsbaseline_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent4_vsbaseline_seed30/logs"],
             "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent4_vsbaseline_seed42/logs"],
         },
         "5v5": {
             "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent10_vsbaseline_seed0/logs"],
             "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent10_vsbaseline_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent10_vsbaseline_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent10_vsbaseline_seed30/logs"],
             "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent10_vsbaseline_seed42/logs"],
+        },
+        "10v10": {
+            "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent20_vsbaseline_seed0/logs"],
+            "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent20_vsbaseline_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent20_vsbaseline_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent20_vsbaseline_seed30/logs"],
+            "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent20_vsbaseline_seed42/logs"],
+        },
+        "20v20": {
+            "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent40_vsbaseline_seed0/logs"],
+            "Seed 10": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent40_vsbaseline_seed10/logs"],
+            "Seed 20": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent40_vsbaseline_seed20/logs"],
+            "Seed 30": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent40_vsbaseline_seed30/logs"],
+            "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent40_vsbaseline_seed42/logs"],
+        },
+        "50v50": {
+            "Seed 0": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent100_vsbaseline_seed0/logs"],
+            "Seed 42": ["/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/combat_agent100_vsbaseline_seed42/logs"],
         },
     }
     
     # 要绘制的指标
     metric = "eval/episodic_return"
+    
+    # 定义各规模的缩放系数
+    scale_factors = {
+        "1v1": 1.0,  # 保持原值
+        "2v2": 100/15/2,  # *100/15/2
+        "5v5": 100/15/5,  # *100/15/5
+        "10v10": 100/15/10,  # *100/15/10
+        "20v20": 100/5/20,  # *100/5/20
+        "50v50": 100/1/50,  # *100/1/50
+    }
     
     # 设置绘图风格
     sns.set_theme(
@@ -89,18 +123,22 @@ def plot_combat_performance():
     fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
     
     # 设置红绿蓝颜色
-    colors = ['red', 'green', 'dodgerblue']
-    scales = ["1v1", "2v2", "5v5"]
+    colors = ['red', 'green', 'dodgerblue', 'orange', 'purple', 'brown']
+    scales = ["1v1", "2v2", "5v5", "10v10", "20v20", "50v50"]
     
     # 创建颜色映射
     color_map = {scale: color for scale, color in zip(scales, colors)}
     
     # 存储最终性能数据以便后续总结
     final_performance = {}
+    original_final_performance = {}
     
     # 处理每个规模的实验
     for scale, seeds_data in experiments_by_scale.items():
         print(f"\n处理 {scale} 规模的数据")
+        
+        # 获取该规模的缩放系数
+        scale_factor = scale_factors[scale]
         
         # 存储这个规模下所有种子的曲线
         all_scale_curves = []
@@ -116,7 +154,7 @@ def plot_combat_performance():
                     continue
                 
                 # 平滑处理
-                _, smoothed_data = process_single_run_data(data['value'].values, window_size=80)
+                _, smoothed_data = process_single_run_data(data['value'].values, window_size=5)
                 all_scale_curves.append(smoothed_data)
                 
                 # 记录最短曲线长度
@@ -135,26 +173,36 @@ def plot_combat_performance():
         mean_curve = np.mean(all_scale_curves, axis=0)
         std_curve = np.std(all_scale_curves, axis=0)
         
+        # 保存原始最终性能
+        original_final_perf = mean_curve[-1]
+        original_final_std = std_curve[-1]
+        original_final_performance[scale] = (original_final_perf, original_final_std)
+        
+        # 应用缩放系数
+        scaled_mean_curve = mean_curve * scale_factor
+        scaled_std_curve = std_curve * scale_factor
+        
         # 创建x轴(环境步数，单位为百万)
         x = np.arange(0, min_length) * (300*1000/1e6)  # 假设每300k步记录一次
         
         # 绘制均值曲线
-        ax.plot(x, mean_curve, color=color_map[scale], label=f"{scale}", linewidth=2)
+        ax.plot(x, scaled_mean_curve, color=color_map[scale], label=f"{scale}", linewidth=2)
         
         # 添加标准差区域
-        ax.fill_between(x, mean_curve - std_curve, mean_curve + std_curve, 
+        ax.fill_between(x, scaled_mean_curve - scaled_std_curve, scaled_mean_curve + scaled_std_curve, 
                        color=color_map[scale], alpha=0.2)
         
-        # 记录最终性能
-        final_perf = mean_curve[-1]
-        final_std = std_curve[-1]
+        # 记录缩放后的最终性能
+        final_perf = scaled_mean_curve[-1]
+        final_std = scaled_std_curve[-1]
         final_performance[scale] = (final_perf, final_std)
-        print(f"{scale} 最终性能: {final_perf:.2f} ± {final_std:.2f}")
+        print(f"{scale} 最终性能 (缩放前): {original_final_perf:.2f} ± {original_final_std:.2f}")
+        print(f"{scale} 最终性能 (缩放后): {final_perf:.2f} ± {final_std:.2f}, 缩放系数: {scale_factor:.4f}")
     
     # 设置图表标题和标签
-    ax.set_title("Combat Task (Vsbaseline) Training Performance", fontsize=16)
+    ax.set_title("Combat Task (Vsbaseline) Training Performance (Normalized)", fontsize=16)
     ax.set_xlabel("Million Environment Steps", fontsize=14)
-    ax.set_ylabel("Average Reward", fontsize=14)
+    ax.set_ylabel("Normalized Reward", fontsize=14)
     ax.legend(loc="lower right", fontsize=12)
     
     # 添加网格
@@ -165,14 +213,18 @@ def plot_combat_performance():
     output_dir = "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/combat/vsbaseline/"
     os.makedirs(output_dir, exist_ok=True)
     
-    plt.savefig(f"{output_dir}Combat_Vsbaseline.png", bbox_inches="tight")
-    plt.savefig(f"{output_dir}Combat_Vsbaseline.pdf", bbox_inches="tight")
-    print(f"\n图表已保存为 {output_dir}Combat_Vsbaseline.png 和 .pdf")
+    plt.savefig(f"{output_dir}Combat_Vsbaseline_Normalized.png", bbox_inches="tight")
+    plt.savefig(f"{output_dir}Combat_Vsbaseline_Normalized.pdf", bbox_inches="tight")
+    print(f"\n图表已保存为 {output_dir}Combat_Vsbaseline_Normalized.png 和 .pdf")
     
     # 输出最终性能总结
-    print("\n最终性能总结:")
-    for scale, (perf, std) in final_performance.items():
+    print("\n原始最终性能总结:")
+    for scale, (perf, std) in original_final_performance.items():
         print(f"{scale}: {perf:.2f} ± {std:.2f}")
+        
+    print("\n缩放后最终性能总结:")
+    for scale, (perf, std) in final_performance.items():
+        print(f"{scale}: {perf:.2f} ± {std:.2f}, 缩放系数: {scale_factors[scale]:.4f}")
     
     plt.show()
 

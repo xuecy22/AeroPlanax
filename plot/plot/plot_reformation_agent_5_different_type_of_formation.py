@@ -65,10 +65,12 @@ def plot_reformation_results():
             "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/agent_5_different_type_of_formation/reformation_agent5_line_seed42/logs"
         ],
         "Wedge": [
-            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/agent_5_different_type_of_formation/reformation_agent5_wedge_seed0/logs",
-            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/agent_5_different_type_of_formation/reformation_agent5_wedge_seed10/logs",
-            "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/agent_5_different_type_of_formation/reformation_agent5_wedge_seed42/logs"
-        ]
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed0/logs",
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed10/logs",
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed42/logs",
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed20/logs",
+        "/home/dqy/aeroplanax/AeroPlanax_heading/plot/plot_result/new/reformation/wedge_different_num_of_agents/reformation_agent5_wedge_seed30/logs",
+        ],
     }
     
     # 只绘制回合奖励指标
@@ -101,7 +103,7 @@ def plot_reformation_results():
                 continue
             
             # 平滑处理
-            _, smoothed_data = process_single_run_data(data['value'].values, window_size=80)
+            _, smoothed_data = process_single_run_data(data['value'].values, window_size=5)
             all_seed_curves.append(smoothed_data)
             
             # 记录最短数据长度
