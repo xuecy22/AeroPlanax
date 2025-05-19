@@ -19,7 +19,7 @@ import distrax
 import tensorboardX
 import jax.experimental
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_combat_hierarchy import AeroPlanaxHierarchicalCombatEnv, HierarchicalCombatTaskParams
+from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -120,8 +120,8 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def make_train(config):
-    env_params = HierarchicalCombatTaskParams()
-    env = AeroPlanaxHierarchicalCombatEnv(env_params)
+    env_params = CombatTaskParams()
+    env = AeroPlanaxCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config['NUM_ALLIES'] = env.num_allies
@@ -520,10 +520,10 @@ def make_train(config):
 str_date_time = datetime.now().strftime('%Y-%m-%d-%H-%M')
 config = {
     "GROUP": "combat",
-    "SEED": 42,
+    "SEED": 30,
     "LR": 3e-4,
     "NUM_ENVS": 300,
-    "NUM_ACTORS": 2,
+    "NUM_ACTORS": 10,
     "NUM_STEPS": 1000,
     "TOTAL_TIMESTEPS": 3e8,
     "FC_DIM_SIZE": 128,
@@ -549,10 +549,10 @@ seed = config['SEED']
 wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
 wandb.init(
     # set the wandb project where this run will be logged
-    project="AeroPlanax",
+    project="Planax",
     # track hyperparameters and run metadata
     config=config,
-    name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
+    name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_vsbaseline_hierarchy_seed{seed}',
     group=config['GROUP'],
     notes='singlecombat vsbaseline hierarchy',
     # dir=config['LOGDIR'],

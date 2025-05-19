@@ -587,8 +587,8 @@ config = {
     "LR": 3e-4,
     "NUM_ENVS": 300,
     "NUM_ACTORS": 2,
-    "NUM_STEPS": 3000,
-    "TOTAL_TIMESTEPS": 9e8,
+    "NUM_STEPS": 1000,
+    "TOTAL_TIMESTEPS": 3e8,
     "FC_DIM_SIZE": 128,
     "GRU_HIDDEN_DIM": 128,
     "UPDATE_EPOCHS": 16,
@@ -612,10 +612,10 @@ seed = config['SEED']
 wandb.tensorboard.patch(root_logdir=config['LOGDIR'])
 wandb.init(
     # set the wandb project where this run will be logged
-    project="AeroPlanax",
+    project="Planax",
     # track hyperparameters and run metadata
     config=config,
-    name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_seed_{seed}',
+    name=config['GROUP'] + f'_agent{config["NUM_ACTORS"]}_selfplay_seed{seed}',
     group=config['GROUP'],
     notes='singlecombat selfplay',
     # dir=config['LOGDIR'],

@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Sequence, Any, Tuple
 from jax import Array
 from jax.typing import ArrayLike
 import chex
@@ -8,8 +8,15 @@ import functools
 import jax
 import jax.numpy as jnp
 from flax import struct
+import flax.linen as nn
+import numpy as np
+import distrax
+import optax
+from flax.linen.initializers import constant, orthogonal
+from flax.training.train_state import TrainState
 from gymnax.environments import spaces
 from .aeroplanax import EnvState, EnvParams, AeroPlanaxEnv
+from .core.simulators import missile, fighterplane
 from .reward_functions import (
     altitude_reward_fn,
     posture_reward_fn,
@@ -20,13 +27,155 @@ from .termination_conditions import (
     safe_return_fn,
     timeout_fn,
 )
-from .utils.utils import  wedge_formation, line_formation, diamond_formation, enforce_safe_distance, get_AO_TA_R
+from .utils.utils import  wedge_formation, line_formation, diamond_formation, enforce_safe_distance, get_AO_TA_R, wrap_PI
+import orbax.checkpoint as ocp
+
+
+
+config = {
+    "SEED": 42,
+    "LR": 3e-4,
+    "NUM_ENVS": 1,
+    "NUM_ACTORS": 4,
+    "FC_DIM_SIZE": 128,
+    "GRU_HIDDEN_DIM": 128,
+    "UPDATE_EPOCHS": 16,
+    "NUM_MINIBATCHES": 5,
+    "GAMMA": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 1e-3,
+    "VF_COEF": 1,
+    "MAX_GRAD_NORM": 2,
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": False,
+    "LOADDIR": "/home/xcy/AeroPlanax-heading/envs/models/baseline"
+}
+
+
+class ScannedRNN(nn.Module):
+    @functools.partial(
+        nn.scan,
+        variable_broadcast="params",
+        in_axes=0,
+        out_axes=0,
+        split_rngs={"params": False},
+    )
+    @nn.compact
+    def __call__(self, carry, x):
+        """Applies the module."""
+        rnn_state = carry
+        ins, resets = x
+        rnn_state = jnp.where(
+            resets[:, np.newaxis],
+            self.initialize_carry(*rnn_state.shape),
+            rnn_state,
+        )
+        new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
+        return new_rnn_state, y
+
+    @staticmethod
+    def initialize_carry(batch_size, hidden_size):
+        # Use a dummy key since the default state init fn is just zeros.
+        cell = nn.GRUCell(features=hidden_size)
+        return cell.initialize_carry(jax.random.PRNGKey(0), (batch_size, hidden_size))
+
+
+class ActorCriticRNN(nn.Module):
+    action_dim: Sequence[int]
+    config: Dict
+
+    @nn.compact
+    def __call__(self, hidden, x):
+        if self.config["ACTIVATION"] == "relu":
+            activation = nn.relu
+        else:
+            activation = nn.tanh
+        obs, dones = x
+        embedding = nn.Dense(
+            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(obs)
+        embedding = activation(embedding)
+
+        rnn_in = (embedding, dones)
+        hidden, embedding = ScannedRNN()(hidden, rnn_in)
+
+        actor_mean = nn.Dense(
+            self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0)
+        )(embedding)
+        actor_mean = activation(actor_mean)
+        actor_throttle_mean = nn.Dense(
+            self.action_dim[0], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_elevator_mean = nn.Dense(
+            self.action_dim[1], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_aileron_mean = nn.Dense(
+            self.action_dim[2], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_rudder_mean = nn.Dense(
+            self.action_dim[3], kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        pi_throttle = distrax.Categorical(logits=actor_throttle_mean)
+        pi_elevator = distrax.Categorical(logits=actor_elevator_mean)
+        pi_aileron = distrax.Categorical(logits=actor_aileron_mean)
+        pi_rudder = distrax.Categorical(logits=actor_rudder_mean)
+
+        critic = nn.Dense(
+            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0)
+        )(embedding)
+        critic = activation(critic)
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
+            critic
+        )
+
+        return hidden, (pi_throttle, pi_elevator, pi_aileron, pi_rudder), jnp.squeeze(critic, axis=-1)
+
+def linear_schedule(count):
+        frac = (
+            1.0
+            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+            / config["NUM_UPDATES"]
+        )
+        return config["LR"] * frac
+
+# init model
+controller = ActorCriticRNN([31, 41, 41, 41], config=config)
+rng = jax.random.PRNGKey(config['SEED'])
+init_x = (
+    jnp.zeros(
+        (1, config["NUM_ENVS"] * config["NUM_ACTORS"], 16)
+    ),
+    jnp.zeros((1, config["NUM_ENVS"] * config["NUM_ACTORS"])),
+)
+init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"] * config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+controller_params = controller.init(rng, init_hstate, init_x)
+if config["ANNEAL_LR"]:
+    tx = optax.chain(
+        optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+        optax.adam(learning_rate=linear_schedule, eps=1e-5),
+    )
+else:
+    tx = optax.chain(
+        optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+        optax.adam(config["LR"], eps=1e-5),
+    )
+train_state = TrainState.create(
+    apply_fn=controller.apply,
+    params=controller_params,
+    tx=tx,
+)
+state = {"params": train_state.params, "opt_state": train_state.opt_state, "epoch": jnp.array(0)}
+ckptr = ocp.AsyncCheckpointer(ocp.StandardCheckpointHandler())
+checkpoint = ckptr.restore(config['LOADDIR'], args=ocp.args.StandardRestore(item=state))
+controller_params = checkpoint["params"]
 
 
 @struct.dataclass
 class CombatTaskState(EnvState):
+    hstate: ArrayLike
     @classmethod
-    def create(cls, env_state: EnvState):
+    def create(cls, env_state: EnvState, extra_state: Array):
         return cls(
             plane_state=env_state.plane_state,
             missile_state=env_state.missile_state,
@@ -34,7 +183,8 @@ class CombatTaskState(EnvState):
             pre_rewards=env_state.pre_rewards,
             done=env_state.done,
             success=env_state.success,
-            time=env_state.time
+            time=env_state.time,
+            hstate=extra_state,
         )
 
 
@@ -52,6 +202,7 @@ class CombatTaskParams(EnvParams):
     max_steps: int = 100
     sim_freq: int = 50
     agent_interaction_steps: int = 10
+    use_artillery: bool = False
     max_altitude: float = 6000
     min_altitude: float = 6000
     max_vt: float = 240
@@ -63,6 +214,8 @@ class CombatTaskParams(EnvParams):
     team_spacing: float = 600
     safe_distance: float = 100
     posture_reward_scale: float = 100.0
+    use_baseline: bool = False
+    use_hierarchy: bool = False
 
 class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
     def __init__(self, env_params: Optional[CombatTaskParams] = None):
@@ -95,6 +248,13 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
             timeout_fn,
         ]
 
+        self.norm_delta_altitude = jnp.array([0.1, 0.0, -0.1])
+        self.norm_delta_heading = jnp.array([-jnp.pi / 6, -jnp.pi / 12, 0.0, jnp.pi / 12, jnp.pi / 6])
+        self.norm_delta_velocity = jnp.array([0.05, 0.0, -0.05])
+
+        self.use_baseline = env_params.use_baseline
+        self.use_hierarchy = env_params.use_hierarchy
+
     def _get_obs_size(self) -> int:
         if self.observation_type == 0:
             return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
@@ -103,6 +263,126 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
             return (self.unit_features * (self.num_allies - 1) + self.unit_features * self.num_enemies + self.own_features)
         else:
             raise ValueError("Provided observation type is not valid")
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _decode_actions(
+        self,
+        key: chex.PRNGKey,
+        init_state: CombatTaskState,
+        state: CombatTaskState,
+        actions: Dict[AgentName, chex.Array]
+    ):
+        # Convert actions to array
+        actions = jnp.array([actions[i] for i in self.agents])
+        
+        def calculate_enemy_deltas():
+            """Calculate delta values between enemies and allies."""
+            # Extract positions and velocities
+            ego_x = init_state.plane_state.north[self.num_allies:]
+            ego_y = init_state.plane_state.east[self.num_allies:]
+            ego_z = init_state.plane_state.altitude[self.num_allies:]
+            ego_vx = init_state.plane_state.vel_x[self.num_allies:]
+            ego_vy = init_state.plane_state.vel_y[self.num_allies:]
+            
+            enm_x = init_state.plane_state.north[:self.num_allies]
+            enm_y = init_state.plane_state.east[:self.num_allies]
+            enm_z = init_state.plane_state.altitude[:self.num_allies]
+            
+            # Delta altitude
+            enm_delta_altitude = enm_z - ego_z
+            
+            # Delta heading calculation
+            delta_x, delta_y = enm_x - ego_x, enm_y - ego_y
+            ego_v = jnp.linalg.norm(jnp.vstack((ego_vx, ego_vy)), axis=0)
+            R = jnp.linalg.norm(jnp.vstack((delta_x, delta_y)), axis=0)
+            proj_dist = delta_x * ego_vx + delta_y * ego_vy
+            ego_AO = jnp.arccos(jnp.clip(proj_dist / (R * ego_v + 1e-6), -1, 1))
+            side_flag = jnp.sign(ego_vx * delta_y - ego_vy * delta_x)
+            enm_delta_heading = ego_AO * side_flag
+            
+            # Delta velocity
+            enm_delta_vt = init_state.plane_state.vt[:self.num_allies] - init_state.plane_state.vt[self.num_allies:]
+            
+            return enm_delta_altitude, enm_delta_heading, enm_delta_vt
+
+        def get_controller_actions(target_altitude, target_heading, target_vt):
+            """Generate controller actions from target states."""
+            last_obs = self._get_controller_obs(state.plane_state, target_altitude, target_heading, target_vt)
+            last_obs = jnp.transpose(last_obs)
+            last_done = jnp.zeros(self.num_agents, dtype=bool)
+            ac_in = (last_obs[np.newaxis, :], last_done[np.newaxis, :])
+            
+            hstate, pi, _ = controller.apply(controller_params, state.hstate, ac_in)
+            pi_throttle, pi_elevator, pi_aileron, pi_rudder = pi
+            
+            # Sample all actions at once
+            keys = jax.random.split(key, 5)
+            samples = [
+                dist.sample(seed=keys[i+1]) 
+                for i, dist in enumerate([pi_throttle, pi_elevator, pi_aileron, pi_rudder])
+            ]
+            
+            action = jnp.concatenate([s[:, :, np.newaxis] for s in samples], axis=-1)
+            return hstate, action.squeeze(0)
+
+        # Main logic
+        if self.use_hierarchy:
+            if not self.use_baseline:
+                # Hierarchical non-baseline case
+                delta_altitude = self.norm_delta_altitude[actions[:, 0]] * 1000
+                delta_heading = self.norm_delta_heading[actions[:, 1]]
+                delta_vt = self.norm_delta_velocity[actions[:, 2]] * 340
+            else:
+                # Hierarchical baseline case
+                ego_delta_altitude = self.norm_delta_altitude[actions[:self.num_allies, 0]] * 1000
+                ego_delta_heading = self.norm_delta_heading[actions[:self.num_allies, 1]]
+                ego_delta_vt = self.norm_delta_velocity[actions[:self.num_allies, 2]] * 340
+                
+                enm_delta_altitude, enm_delta_heading, enm_delta_vt = calculate_enemy_deltas()
+                
+                delta_altitude = jnp.hstack((ego_delta_altitude, enm_delta_altitude))
+                delta_heading = jnp.hstack((ego_delta_heading, enm_delta_heading))
+                delta_vt = jnp.hstack((ego_delta_vt, enm_delta_vt))
+            
+            # Common target calculations
+            target_altitude = init_state.plane_state.altitude + delta_altitude
+            target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+            target_vt = init_state.plane_state.vt + delta_vt
+            
+            # Get controller actions
+            hstate, action = get_controller_actions(target_altitude, target_heading, target_vt)
+            state = state.replace(hstate=hstate)
+            action = jax.vmap(self._decode_discrete_actions)(action)
+        
+        else:  # Non-hierarchical case
+            if not self.use_baseline:
+                if self.agent_type == 0:
+                    if self.action_type == 0:
+                        actions = jnp.clip(actions, min=-1, max=1)
+                        return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+                    elif self.action_type == 1:
+                        actions = jax.vmap(self._decode_discrete_actions)(actions)
+                        return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(actions)
+                    raise NotImplementedError(f"Action type {self.action_type} not implemented")
+                raise NotImplementedError(f"Agent type {self.agent_type} not implemented")
+            
+            else:  # Non-hierarchical baseline case
+                enm_delta_altitude, enm_delta_heading, enm_delta_vt = calculate_enemy_deltas()
+                
+                delta_altitude = jnp.hstack((jnp.zeros_like(enm_delta_altitude), enm_delta_altitude))
+                delta_heading = jnp.hstack((jnp.zeros_like(enm_delta_heading), enm_delta_heading))
+                delta_vt = jnp.hstack((jnp.zeros_like(enm_delta_vt), enm_delta_vt))
+                
+                target_altitude = init_state.plane_state.altitude + delta_altitude
+                target_heading = wrap_PI(init_state.plane_state.yaw + delta_heading)
+                target_vt = init_state.plane_state.vt + delta_vt
+                
+                hstate, action = get_controller_actions(target_altitude, target_heading, target_vt)
+                state = state.replace(hstate=hstate)
+                action = jnp.vstack((actions[:self.num_allies], action[self.num_allies:]))
+                action = jax.vmap(self._decode_discrete_actions)(action)
+        
+        return state, jax.vmap(fighterplane.FighterPlaneControlState.create)(action)
 
     @property
     def default_params(self) -> CombatTaskParams:
@@ -115,7 +395,8 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         params: CombatTaskParams
     ) -> CombatTaskState:
         state = super()._init_state(key, params)
-        state = CombatTaskState.create(state)
+        init_hstate = ScannedRNN.initialize_carry(self.num_agents, config["GRU_HIDDEN_DIM"])
+        state = CombatTaskState.create(state, init_hstate)
         return state
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -126,7 +407,6 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         params: CombatTaskParams,
     ) -> CombatTaskState:
         """Task-specific reset."""
-
         key, key_formation = jax.random.split(key)
         state = self._generate_formation(key_formation, state, params)
         yaw = jnp.where(jnp.arange(self.num_agents) < self.num_allies, 0.0, jnp.pi)
@@ -244,7 +524,62 @@ class AeroPlanaxCombatEnv(AeroPlanaxEnv[CombatTaskState, CombatTaskParams]):
         own_unit_obs = get_all_self_features(state, jnp.arange(self.num_agents))
         obs = jnp.concatenate([other_unit_obs, own_unit_obs], axis=-1)
         return {agent: obs[self.agent_ids[agent]] for agent in self.agents}
+    
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def _get_controller_obs(
+        self,
+        state: fighterplane.FighterPlaneState,
+        target_altitude,
+        target_heading,
+        target_vt
+    ) -> Dict[AgentName, chex.Array]:
+        """
+        Task-specific observation function to state.
 
+        observation(dim 16):
+            0. ego_delta_altitude      (unit: km)
+            1. ego_delta_heading       (unit rad)
+            2. ego_delta_vt            (unit: mh)
+            3. ego_altitude            (unit: 5km)
+            4. ego_roll_sin
+            5. ego_roll_cos
+            6. ego_pitch_sin
+            7. ego_pitch_cos
+            8. ego_vt                  (unit: mh)
+            9. ego_alpha_sin
+            10. ego_alpha_cos
+            11. ego_beta_sin
+            12. ego_beta_cos
+            13. ego_P                  (unit: rad/s)
+            14. ego_Q                  (unit: rad/s)
+            15. ego_R                  (unit: rad/s)
+        """
+        altitude = state.altitude
+        roll, pitch, yaw = state.roll, state.pitch, state.yaw
+        vt = state.vt
+        alpha = state.alpha
+        beta = state.beta
+        P, Q, R = state.P, state.Q, state.R
+
+        norm_delta_altitude = (altitude - target_altitude) / 1000
+        norm_delta_heading = wrap_PI((yaw - target_heading))
+        norm_delta_vt = (vt - target_vt) / 340
+        norm_altitude = altitude / 5000
+        roll_sin = jnp.sin(roll)
+        roll_cos = jnp.cos(roll)
+        pitch_sin = jnp.sin(pitch)
+        pitch_cos = jnp.cos(pitch)
+        norm_vt = vt / 340
+        alpha_sin = jnp.sin(alpha)
+        alpha_cos = jnp.cos(alpha)
+        beta_sin = jnp.sin(beta)
+        beta_cos = jnp.cos(beta)
+        obs = jnp.vstack((norm_delta_altitude, norm_delta_heading, norm_delta_vt,
+                          norm_altitude, norm_vt,
+                          roll_sin, roll_cos, pitch_sin, pitch_cos,
+                          alpha_sin, alpha_cos, beta_sin, beta_cos,
+                          P, Q, R))
+        return obs
 
     @functools.partial(jax.jit, static_argnums=(0, ))
     def _generate_formation(

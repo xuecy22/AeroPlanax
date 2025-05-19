@@ -286,7 +286,7 @@ def test(config, rng):
     )
     success_counts = 0
     done_counts = 0
-    for _ in range(2000):
+    for _ in range(1000):
         test_state, traj_batch = _env_step(test_state)
         env_state = test_state[0].env_state
         done = jnp.any(traj_batch.info["returned_episode"])
@@ -321,7 +321,7 @@ config = {
     "MAX_GRAD_NORM": 2,
     "ACTIVATION": "relu",
     "ANNEAL_LR": False,
-    "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-16-21-31/checkpoints/checkpoint_epoch_1000" 
+    # "LOADDIR": "/home/xcy/AeroPlanax-heading/results/2025-04-16-21-31/checkpoints/checkpoint_epoch_1000" 
 }
 rng = jax.random.PRNGKey(42)
 out = test(config, rng)

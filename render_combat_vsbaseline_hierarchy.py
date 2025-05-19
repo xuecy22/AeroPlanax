@@ -17,7 +17,7 @@ from flax.training.train_state import TrainState
 import distrax
 import optax
 from envs.wrappers import LogWrapper
-from envs.aeroplanax_combat_hierarchy import AeroPlanaxHierarchicalCombatEnv, HierarchicalCombatTaskParams
+from envs.aeroplanax_combat import AeroPlanaxCombatEnv, CombatTaskParams
 import orbax.checkpoint as ocp
 
 
@@ -124,8 +124,8 @@ def test(config, rng):
         )
         return config["LR"] * frac
     # init env
-    env_params = HierarchicalCombatTaskParams()
-    env = AeroPlanaxHierarchicalCombatEnv(env_params)
+    env_params = CombatTaskParams()
+    env = AeroPlanaxCombatEnv(env_params)
     env = LogWrapper(env)
     config["NUM_ACTORS"] = env.num_agents
     config['NUM_ALLIES'] = env.num_allies
