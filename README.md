@@ -14,7 +14,7 @@
 
 ---
 
-![fromework](assets/code structure.png)
+![Code structure](assets/code_structure.png)
 
 ## Installation
 
@@ -55,7 +55,7 @@ conda activate NeuralPlanex
 * **Reward** – negative absolute heading error with small penalties for attitude deviation and control effort.
 * **Termination** – episode ends after 300 simulation steps(30 s), or instantly if the aircraft stalls, exceeds load limits, or hits the ground.
 
-![Heading (single‑agent)](assets/Heading.gif)
+![Heading task demo](assets/heading.gif)
 
 ### 2. Formation
 
@@ -65,7 +65,7 @@ conda activate NeuralPlanex
 * **Reward** – quadratic distance to slot, collision penalty, shape‑keeping bonus, and control cost.
 * **Termination** – collision, ground impact, or maximum episode length.
 
-![Formation](assets/Formation.gif)
+![Formation task demo](assets/formation.gif)
 
 ### 3. End‑to‑End Combat (self‑play / vs‑baseline)
 
@@ -83,7 +83,7 @@ conda activate NeuralPlanex
 * **Reward** – same combat‑outcome terms, plus an imitation bonus favouring smooth, feasible guidance.
 * **Advantages** – faster learning, clearer long‑horizon credit assignment, and the ability to swap different guidance laws with minimal retraining.
 
-![Hierarchical Combat (self‑play / vs‑baseline)](assets/5v5_hier.gif)
+![Hierarchical Combat (self‑play) task demo](assets/5v5_hierarchy.gif)
 
 ---
 
