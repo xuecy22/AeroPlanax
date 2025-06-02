@@ -36,7 +36,7 @@ conda activate NeuralPlanex
 
 | Path           | Purpose                                                       |
 | -------------- | ------------------------------------------------------------- |
-| `dynamics/`    | Six‑DOF aircraft & missile models                             |
+| `dynamics/`    | Six‑DOF aircraft models                             |
 | `interpolate/` | Trilinear & spline lookup for aero tables                     |
 | `envs/`        | Gymnax‑compatible tasks (`heading`, `formation`, `combat`, …) |
 | `train_*.py`   | PPO / MAPPO baselines                                         |
