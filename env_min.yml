@@ -1,0 +1,27 @@
+name: NeuralPlanex_test
+channels:
+  - conda-forge
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+  - defaults
+dependencies:
+  - python=3.10.16
+  - pip=25.0
+  - numpy=2.2.2
+  - scipy=1.15.1
+  - matplotlib=3.10.0
+  - jax=0.4.35
+  - jaxlib=0.4.35
+  - flax=0.10.2
+  - optax=0.2.4
+  - pip:
+    - wandb
+    - distrax
+    - tensorboardX
+    - gymnax
+    - tensorboard
+    - torch==2.5.1+cu121
+    - torchvision==0.20.1+cu121
+    - torchaudio==2.5.1+cu121
+    - --index-url https://download.pytorch.org/whl/cu121
